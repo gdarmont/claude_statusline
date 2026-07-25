@@ -83,16 +83,53 @@ Two binaries are produced in `target/release/`:
 ## Install
 
 ```sh
-./install.sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh | bash
 ```
 
-Builds both binaries, backs up the previously installed `claude_statusline` to
-`claude_statusline.bak` on first run, replaces both in `~/.claude/`, and smoke-tests what landed.
-Set `CLAUDE_DIR` to install somewhere else. To do it by hand:
+Detects your platform, downloads the matching zip from the latest release, verifies it against the
+published `SHA256SUMS`, backs up any existing `claude_statusline` to `claude_statusline.bak` on
+first run, and installs both binaries into `~/.claude/`. Prebuilt binaries cover x86_64 Linux
+(static musl) and both Apple Silicon and Intel macOS; anything else needs a source build.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDE_DIR` | `~/.claude` | Install directory |
+| `VERSION` | latest release | Pin to a specific tag, e.g. `v0.9.0` |
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
+  | VERSION=v0.9.0 CLAUDE_DIR=/opt/claude bash
+```
+
+### From source
+
+```sh
+./dev-install.sh
+```
+
+Builds both binaries in release mode, installs them the same way, and smoke-tests what landed. Or
+by hand:
+
+```sh
+cargo build --release
 cp target/release/claude_statusline target/release/claude_subagent_statusline ~/.claude/
 ```
+
+## Releasing
+
+Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) when a `v*`
+tag is pushed. Bump `version` in `Cargo.toml` first -- the workflow refuses to build when the tag
+and the crate version disagree.
+
+```sh
+cargo build --release   # refresh Cargo.lock, which CI installs with --locked
+git commit -am "Release v0.9.0"
+git tag -a v0.9.0 -m "v0.9.0"
+git push origin master --follow-tags
+```
+
+Each platform job zips both binaries together, and the release job publishes every zip plus a
+`SHA256SUMS` file with auto-generated release notes.
 
 ## Configure Claude Code
 
