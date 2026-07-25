@@ -1,31 +1,73 @@
 # Claude Statusline
 
-A powerline-style statusline renderer for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). It reads session data as JSON from stdin and outputs ANSI-colored, powerline-styled text.
+A powerline-style statusline renderer for [Claude Code](https://code.claude.com/docs/en/statusline). It reads session data as JSON from stdin and outputs ANSI-colored, powerline-styled text.
 
 ```
- myproject  main  Claude Opus 4.6  $0.42  37%
+ claude_statusline   master  ⧉ my-feature ← master  PR #1234 approved            session-name
+ Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k       $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
 ```
+
+The output is two rows: the first says *where* you are working, the second says *how* the session is going. Every section is hidden when its data is absent, so a fresh session in a plain directory renders just the directory and the model.
+
+Each row is split into a left group and a right group pinned to the right edge, so spend and rate limits keep a fixed screen position instead of drifting as the left side grows.
 
 ## Sections
 
+### Row 1 — location
+
 | Section | Color | Description |
 |---------|-------|-------------|
-| Directory | Blue | Current working directory name |
-| Git branch | Green | Current branch (hidden outside git repos) |
-| Model | Gray | Active model name |
-| Cost | Purple | Session cost in USD (hidden when $0.00) |
-| Context | Green / Yellow / Red | Context window usage percentage |
+| Directory | Blue | Current directory name. Clickable (OSC 8) link to the remote repo when `workspace.repo` is present |
+| Git branch | Green | `worktree.branch` when available, otherwise `git branch --show-current` in the workspace directory |
+| Worktree | Teal | `--worktree` session or linked git worktree, with the branch it came from |
+| Pull request | State-colored | Open PR for the current branch, clickable. Green approved / red changes requested / yellow pending |
+| Session name | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
 
-Context window color thresholds:
+### Row 2 — session state
+
+| Section | Color | Description |
+|---------|-------|-------------|
+| Model | Gray | Model name, plus `⚡` fast mode, `✻` thinking, and the reasoning effort level |
+| Agent | Orange | Active agent name (`--agent` or agent settings) |
+| Lines changed | Olive | `+added/-removed` for the session |
+| Context | Green / Yellow / Red | Usage percentage, `used/total` tokens, `↺` cache reads, `200k+` marker |
+| Cost | Purple | **Right-aligned.** Session cost in USD (hidden below $0.01) |
+| Duration | Indigo | **Right-aligned.** Wall-clock session time |
+| Rate limits | Green / Yellow / Red | **Right-aligned.** 5-hour and 7-day subscription usage with time until reset |
+
+Threshold colors for context and rate limits:
 - **Green** -- 0-59%
 - **Yellow** -- 60-80%
 - **Red** -- above 80%
+
+### Right alignment
+
+Claude Code captures the script's stdout, so `tput cols` cannot see the terminal. It exports
+`COLUMNS` and `LINES` instead (v2.1.153+), and the renderer pads between the two groups to push
+the right one against the edge. Widths are measured in terminal cells with `unicode-width`, not
+bytes or chars, so the powerline glyphs and emoji markers line up.
+
+It degrades rather than wraps. When `COLUMNS` is unset, or the two groups would collide on a
+narrow terminal, everything renders as one continuous powerline with no padding.
+
+`COLUMNS` is the full terminal width, but Claude Code draws the status line inside its own chrome
+and truncates whatever overflows, so five cells are held back from the right edge. Change that with
+`CLAUDE_STATUSLINE_RIGHT_MARGIN` -- raise it if the right group still gets clipped, lower it if the
+gap looks too wide:
+
+```json
+{ "env": { "CLAUDE_STATUSLINE_RIGHT_MARGIN": "7" } }
+```
+
+To move a section between sides, move its `Section::new(...)` push between the `sections` and
+`right` vectors in `location_sections` / `session_sections` in `src/main.rs`.
 
 ## Requirements
 
 - Rust 1.85+
 - A terminal with true color (24-bit) support
 - A font with powerline glyphs (e.g. Nerd Font)
+- Clickable PR and repo links need a terminal with OSC 8 support (Ghostty, iTerm2, Kitty, WezTerm)
 
 ## Build
 
@@ -33,19 +75,28 @@ Context window color thresholds:
 cargo build --release
 ```
 
-The binary is produced at `target/release/claude_statusline`.
+Two binaries are produced in `target/release/`:
+
+- `claude_statusline` -- the main status line
+- `claude_subagent_statusline` -- one row per subagent in the agent panel
 
 ## Install
 
-Copy the binary somewhere on your path or into `~/.claude/`:
+```sh
+./install.sh
+```
+
+Builds both binaries, backs up the previously installed `claude_statusline` to
+`claude_statusline.bak` on first run, replaces both in `~/.claude/`, and smoke-tests what landed.
+Set `CLAUDE_DIR` to install somewhere else. To do it by hand:
 
 ```sh
-cp target/release/claude_statusline ~/.claude/claude_statusline
+cp target/release/claude_statusline target/release/claude_subagent_statusline ~/.claude/
 ```
 
 ## Configure Claude Code
 
-Add the following to your Claude Code settings file (`~/.claude/settings.json`):
+In `~/.claude/settings.json`:
 
 ```json
 {
@@ -53,6 +104,10 @@ Add the following to your Claude Code settings file (`~/.claude/settings.json`):
     "type": "command",
     "command": "~/.claude/claude_statusline",
     "padding": 0
+  },
+  "subagentStatusLine": {
+    "type": "command",
+    "command": "~/.claude/claude_subagent_statusline"
   }
 }
 ```
@@ -61,28 +116,78 @@ Restart Claude Code for the change to take effect.
 
 ## Input format
 
-Claude Code pipes a JSON object to the binary's stdin. The relevant fields are:
+Claude Code pipes a JSON object to stdin on every refresh. Every field below is optional except `workspace.current_dir` and `model.display_name`:
 
 ```json
 {
+  "session_name": "my-session",
+  "model": { "display_name": "Opus" },
   "workspace": {
-    "current_dir": "/home/user/projects/myproject"
-  },
-  "model": {
-    "display_name": "Claude Opus 4.6"
+    "current_dir": "/home/user/projects/myproject",
+    "git_worktree": "feature-xyz",
+    "repo": { "host": "github.com", "owner": "anthropics", "name": "claude-code" }
   },
   "cost": {
-    "total_cost_usd": 0.42
+    "total_cost_usd": 0.42,
+    "total_duration_ms": 754000,
+    "total_lines_added": 156,
+    "total_lines_removed": 23
   },
   "context_window": {
-    "used_percentage": 37.2
-  }
+    "total_input_tokens": 74500,
+    "context_window_size": 200000,
+    "used_percentage": 37.2,
+    "current_usage": { "cache_read_input_tokens": 61000 }
+  },
+  "exceeds_200k_tokens": false,
+  "fast_mode": true,
+  "effort": { "level": "high" },
+  "thinking": { "enabled": true },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
+    "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+  },
+  "agent": { "name": "security-reviewer" },
+  "pr": { "number": 1234, "url": "https://github.com/o/r/pull/1234", "review_state": "approved" },
+  "worktree": { "name": "my-feature", "branch": "worktree-my-feature", "original_branch": "main" }
 }
 ```
 
-You can test it manually:
+Notes on availability:
+
+- `rate_limits` appears for Claude.ai Pro/Max subscribers after the first API response
+- `pr` appears only while an open PR exists for the branch
+- `effort` appears only on models supporting the reasoning effort parameter
+- `context_window.current_usage` is `null` before the first API call and after `/compact`
+
+### Subagent rows
+
+`claude_subagent_statusline` receives all visible subagent rows at once and writes one
+`{"id": ..., "content": ...}` line per row:
+
+```json
+{
+  "columns": 80,
+  "tasks": [
+    {
+      "id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
+      "description": "Search the repo", "model": "claude-opus-5", "effort": "high",
+      "contextWindowSize": 200000, "tokenCount": 12500
+    }
+  ]
+}
+```
+
+Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6%`, with the detail column
+truncated to fit `columns` and dropped entirely when there is no room for it. `model` and
+`contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
+
+## Testing manually
 
 ```sh
 echo '{"workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Opus"}}' \
   | ./target/release/claude_statusline
+
+echo '{"columns":80,"tasks":[{"id":"t1","name":"Explore","status":"running","tokenCount":12500,"contextWindowSize":200000}]}' \
+  | ./target/release/claude_subagent_statusline
 ```
