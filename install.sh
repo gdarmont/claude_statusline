@@ -88,10 +88,15 @@ Add this to ~/.claude/settings.json, then restart Claude Code:
   "statusLine": {
     "type": "command",
     "command": "$DEST/claude_statusline",
-    "padding": 0
+    "padding": 0,
+    "refreshInterval": 15
   },
   "subagentStatusLine": {
     "type": "command",
     "command": "$DEST/claude_subagent_statusline"
   }
+
+refreshInterval redraws the status line every 15 seconds, so the prompt cache
+countdown keeps running while the session is idle. Already configured? Add it
+to your existing statusLine block.
 EOF
