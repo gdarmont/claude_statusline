@@ -2,8 +2,7 @@ mod render;
 
 use render::{
     BLUE, CYAN, GRAY, GREEN, INDIGO, OLIVE, ORANGE, PURPLE, RED, SLATE, Section, TEAL, WHITE,
-    YELLOW,
-    fmt_duration_ms, fmt_duration_secs, fmt_tokens, format_row, unix_now, usage_colors,
+    YELLOW, fmt_duration_ms, fmt_duration_secs, fmt_tokens, format_row, unix_now, usage_colors,
 };
 use serde::Deserialize;
 use std::fmt::Write as _;
@@ -179,11 +178,7 @@ fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         .and_then(|w| w.branch.clone())
         .or_else(|| get_git_branch(&input.workspace.current_dir));
     if let Some(branch) = branch {
-        sections.push(Section::new(
-            format!("\u{e0a0} {branch}"),
-            GREEN,
-            WHITE,
-        ));
+        sections.push(Section::new(format!("\u{e0a0} {branch}"), GREEN, WHITE));
     }
 
     // Worktree: `--worktree` session, or a plain linked git worktree
@@ -194,7 +189,11 @@ fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         .or_else(|| input.workspace.git_worktree.clone());
     if let Some(name) = worktree_name {
         let mut text = format!("\u{29c9} {name}");
-        if let Some(original) = input.worktree.as_ref().and_then(|w| w.original_branch.as_ref()) {
+        if let Some(original) = input
+            .worktree
+            .as_ref()
+            .and_then(|w| w.original_branch.as_ref())
+        {
             let _ = write!(text, " \u{2190} {original}");
         }
         sections.push(Section::new(text, TEAL, WHITE));
