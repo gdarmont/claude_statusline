@@ -4,8 +4,37 @@ A powerline-style statusline renderer for [Claude Code](https://code.claude.com/
 
 ```
  claude_statusline   master  ⧉ my-feature ← master  PR #1234 approved            session-name
- Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k       $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
+ Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k  cache 91% 42m00s   $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
 ```
+
+Reading the example, left to right:
+
+**Row 1: where you are**
+
+- `claude_statusline`: the current directory. Click it to open the repository.
+- ` master`: the git branch you're on.
+- `⧉ my-feature ← master`: you're in the worktree `my-feature`, which was created from `master`.
+- `PR #1234 approved`: the open pull request for this branch and its review status. Click it to open the PR. GitLab merge requests show as `MR !1234`.
+- `session-name`: the session's name, from `--name`, `/rename` or an AI-generated title.
+
+**Row 2: how the session is going**
+
+- `Opus`: the model.
+- `⚡`: fast mode is on.
+- `✻`: extended thinking is on.
+- `high`: the reasoning effort level.
+- `security-reviewer`: the agent the session runs as.
+- `+156/-23`: lines added and removed during the session.
+- `37%`: how full the context window is.
+- `74k/200k`: tokens in the context window, out of its size.
+- `↺61k`: tokens the last request read from the prompt cache.
+- `cache 91%`: the prompt cache is warm, and 91% of input tokens this session were served from it.
+- `42m00s`: time before the cache expires. Once it expires, the segment reads `cache cold ↻45k`, the number of tokens your next message has to re-cache.
+- `$0.42`: estimated session cost.
+- `12m34s`: how long the session has been running.
+- `5h 24% (2h13m)`: 24% of the 5-hour rate limit is used, and it resets in 2h13m.
+- `7d 41% (3d5h)`: the same for the 7-day limit.
+- `spend 63% (12d0h)`: not in the example. It appears only behind a Claude apps gateway that sets a spend limit, showing the share of the limit used and time until it resets.
 
 The output is two rows: the first says *where* you are working, the second says *how* the session is going. Every section is hidden when its data is absent, so a fresh session in a plain directory renders just the directory and the model.
 
@@ -20,7 +49,7 @@ Each row is split into a left group and a right group pinned to the right edge, 
 | Directory | Blue | Current directory name. Clickable (OSC 8) link to the remote repo when `workspace.repo` is present |
 | Git branch | Green | `worktree.branch` when available, otherwise `git branch --show-current` in the workspace directory |
 | Worktree | Teal | `--worktree` session or linked git worktree, with the branch it came from |
-| Pull request | State-colored | Open PR for the current branch, clickable. Green approved / red changes requested / yellow pending |
+| Pull request | State-colored | Open PR for the current branch, clickable. `MR !n` for a GitLab merge request. Green approved / red changes requested / yellow pending / slate draft |
 | Session name | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
 
 ### Row 2 — session state
@@ -31,11 +60,12 @@ Each row is split into a left group and a right group pinned to the right edge, 
 | Agent | Orange | Active agent name (`--agent` or agent settings) |
 | Lines changed | Olive | `+added/-removed` for the session |
 | Context | Green / Yellow / Red | Usage percentage, `used/total` tokens, `↺` cache reads, `200k+` marker |
+| Prompt cache | Cyan / Yellow / Slate | Warm: session hit ratio and time until the cache expires, yellow in the last fifth of its TTL. Cold: `↻` tokens the next request re-caches. Hidden when caching isn't observed |
 | Cost | Purple | **Right-aligned.** Session cost in USD (hidden below $0.01) |
 | Duration | Indigo | **Right-aligned.** Wall-clock session time |
-| Rate limits | Green / Yellow / Red | **Right-aligned.** 5-hour and 7-day subscription usage with time until reset |
+| Rate limits | Green / Yellow / Red | **Right-aligned.** 5-hour and 7-day subscription usage, plus the gateway `spend` limit, each with time until reset |
 
-Threshold colors for context and rate limits:
+Threshold colors for context and rate limits (the spend limit can go past 100%):
 - **Green** -- 0-59%
 - **Yellow** -- 60-80%
 - **Red** -- above 80%
@@ -182,7 +212,16 @@ Claude Code pipes a JSON object to stdin on every refresh. Every field below is 
   "thinking": { "enabled": true },
   "rate_limits": {
     "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
-    "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 }
+    "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 },
+    "spend_limit": { "used_percentage": 62.8, "resets_at": 1740787200 }
+  },
+  "prompt_cache": {
+    "warm": true,
+    "caching_observed": true,
+    "ttl": "1h",
+    "expires_at": 1738429200,
+    "hit_ratio": 0.91,
+    "recache_tokens_if_cold": 45000
   },
   "agent": { "name": "security-reviewer" },
   "pr": { "number": 1234, "url": "https://github.com/o/r/pull/1234", "review_state": "approved" },
@@ -192,8 +231,9 @@ Claude Code pipes a JSON object to stdin on every refresh. Every field below is 
 
 Notes on availability:
 
-- `rate_limits` appears for Claude.ai Pro/Max subscribers after the first API response
-- `pr` appears only while an open PR exists for the branch
+- `rate_limits` appears for Claude.ai Pro/Max subscribers after the first API response. `spend_limit` appears only behind a Claude apps gateway that sets one (v2.1.251+)
+- `prompt_cache` appears after the main conversation's first API response (v2.1.251+). `expires_at` is `null` while the cache is cold
+- `pr` appears only while an open PR or GitLab merge request exists for the branch. `kind` is `mr` for a merge request and absent for GitHub (v2.1.234+)
 - `effort` appears only on models supporting the reasoning effort parameter
 - `context_window.current_usage` is `null` before the first API call and after `/compact`
 

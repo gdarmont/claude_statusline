@@ -1,7 +1,8 @@
 mod render;
 
 use render::{
-    BLUE, GRAY, GREEN, INDIGO, OLIVE, ORANGE, PURPLE, RED, SLATE, Section, TEAL, WHITE, YELLOW,
+    BLUE, CYAN, GRAY, GREEN, INDIGO, OLIVE, ORANGE, PURPLE, RED, SLATE, Section, TEAL, WHITE,
+    YELLOW,
     fmt_duration_ms, fmt_duration_secs, fmt_tokens, format_row, unix_now, usage_colors,
 };
 use serde::Deserialize;
@@ -22,6 +23,7 @@ struct Input {
     effort: Option<Effort>,
     thinking: Option<Thinking>,
     rate_limits: Option<RateLimits>,
+    prompt_cache: Option<PromptCache>,
     agent: Option<Agent>,
     pr: Option<Pr>,
     worktree: Option<Worktree>,
@@ -88,6 +90,23 @@ struct Thinking {
 struct RateLimits {
     five_hour: Option<RateWindow>,
     seven_day: Option<RateWindow>,
+    /// Behind a Claude apps gateway only; may exceed 100%.
+    spend_limit: Option<RateWindow>,
+}
+
+/// Main-conversation prompt cache statistics, after the first API response.
+#[derive(Deserialize)]
+struct PromptCache {
+    warm: Option<bool>,
+    /// False when caching is off or the provider doesn't report it.
+    caching_observed: Option<bool>,
+    ttl: Option<String>,
+    /// Null while cold.
+    expires_at: Option<u64>,
+    /// Cache reads as a fraction of all input, 0 to 1.
+    hit_ratio: Option<f64>,
+    /// Null right after a compaction until the next request.
+    recache_tokens_if_cold: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +125,8 @@ struct Pr {
     number: Option<u64>,
     url: Option<String>,
     review_state: Option<String>,
+    /// `mr` for a GitLab merge request, absent for GitHub.
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -181,9 +202,12 @@ fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
 
     // Open pull request for the current branch
     if let Some(pr) = &input.pr {
-        let mut text = match pr.number {
-            Some(number) => format!("PR #{number}"),
-            None => "PR".to_string(),
+        let is_mr = pr.kind.as_deref() == Some("mr");
+        let mut text = match (pr.number, is_mr) {
+            (Some(number), true) => format!("MR !{number}"),
+            (Some(number), false) => format!("PR #{number}"),
+            (None, true) => "MR".to_string(),
+            (None, false) => "PR".to_string(),
         };
         let (bg, fg) = match pr.review_state.as_deref() {
             Some("approved") => (GREEN, WHITE),
@@ -280,6 +304,10 @@ fn session_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         sections.push(Section::new(text, bg, fg));
     }
 
+    if let Some(cache) = &input.prompt_cache {
+        sections.extend(prompt_cache_section(cache));
+    }
+
     // Subscription rate limits
     if let Some(limits) = &input.rate_limits {
         if let Some(window) = &limits.five_hour {
@@ -287,6 +315,9 @@ fn session_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         }
         if let Some(window) = &limits.seven_day {
             right.extend(rate_limit_section("7d", window));
+        }
+        if let Some(window) = &limits.spend_limit {
+            right.extend(rate_limit_section("spend", window));
         }
     }
 
@@ -305,6 +336,48 @@ fn rate_limit_section(label: &str, window: &RateWindow) -> Option<Section> {
     }
 
     let (bg, fg) = usage_colors(pct);
+    Some(Section::new(text, bg, fg))
+}
+
+/// Warm: hit ratio and time until the cached prefix expires. Cold: what the next request re-caches.
+fn prompt_cache_section(cache: &PromptCache) -> Option<Section> {
+    if cache.caching_observed != Some(true) {
+        return None;
+    }
+
+    // The payload can be stale by the time it renders, so check expiry locally too
+    let now = unix_now();
+    let remaining = cache
+        .expires_at
+        .filter(|&expires_at| cache.warm == Some(true) && expires_at > now)
+        .map(|expires_at| expires_at - now);
+
+    let Some(remaining) = remaining else {
+        let mut text = "cache cold".to_string();
+        if let Some(tokens) = cache.recache_tokens_if_cold
+            && tokens > 0
+        {
+            let _ = write!(text, " \u{21bb}{}", fmt_tokens(tokens));
+        }
+        return Some(Section::new(text, SLATE, WHITE));
+    };
+
+    let mut text = "cache".to_string();
+    if let Some(ratio) = cache.hit_ratio {
+        let _ = write!(text, " {}%", (ratio * 100.0).round() as u64);
+    }
+    let _ = write!(text, " {}", fmt_duration_secs(remaining));
+
+    // Yellow in the last fifth of the TTL: send soon or pay to rebuild
+    let ttl_secs = match cache.ttl.as_deref() {
+        Some("1h") => 3_600,
+        _ => 300,
+    };
+    let (bg, fg) = if remaining * 5 <= ttl_secs {
+        (YELLOW, render::BLACK)
+    } else {
+        (CYAN, WHITE)
+    };
     Some(Section::new(text, bg, fg))
 }
 

@@ -45,6 +45,7 @@ pub const SLATE: Rgb = Rgb(84, 88, 106);
 pub const ORANGE: Rgb = Rgb(158, 88, 38);
 pub const OLIVE: Rgb = Rgb(58, 84, 52);
 pub const INDIGO: Rgb = Rgb(66, 66, 96);
+pub const CYAN: Rgb = Rgb(34, 110, 140);
 
 pub struct Section {
     pub text: String,
