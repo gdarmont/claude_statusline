@@ -2,16 +2,24 @@ name: Release
 
 # Tagging v* publishes a GitHub release with one zip per platform, each holding
 # both binaries, plus a SHA256SUMS file that install.sh verifies against.
+#
+# Running it by hand (workflow_dispatch) is a dry run: it tests, builds and
+# packages every platform, then stops short of publishing.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: ${{ matrix.label }}
+    needs: ci
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -30,9 +38,10 @@ jobs:
             label: x86_64-macos
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the tag matches Cargo.toml
+        if: github.ref_type == 'tag'
         run: |
           crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           tag="${GITHUB_REF_NAME#v}"
@@ -59,7 +68,7 @@ jobs:
             "target/${{ matrix.target }}/release/claude_subagent_statusline"
           echo "ASSET=$asset" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.label }}
           path: ${{ env.ASSET }}
@@ -71,7 +80,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
@@ -80,6 +89,7 @@ jobs:
         run: cd dist && sha256sum *.zip | tee SHA256SUMS
 
       - name: Create release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

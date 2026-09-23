@@ -13,6 +13,7 @@ use render::{
 };
 use serde::Deserialize;
 use std::io::Read;
+use unicode_width::UnicodeWidthStr as _;
 
 const DIM: Rgb = Rgb(120, 124, 138);
 const SEPARATOR: &str = " \u{b7} ";
@@ -133,9 +134,10 @@ fn render_row(task: &Task, columns: Option<usize>) -> String {
         .filter(|d| !d.is_empty());
 
     if let Some(detail) = detail {
-        let fixed: usize = parts.iter().map(|(text, _)| text.chars().count()).sum();
+        // Terminal cells, not chars: a wide name or model would otherwise overflow the row
+        let fixed: usize = parts.iter().map(|(text, _)| text.width()).sum();
         // marker + space, plus a separator before every part after the name
-        let overhead = 2 + SEPARATOR.chars().count() * parts.len();
+        let overhead = marker.width() + 1 + SEPARATOR.width() * parts.len();
         let budget = columns
             .unwrap_or(usize::MAX)
             .saturating_sub(fixed + overhead);
@@ -175,6 +177,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() {
+    // Claude Code passes no arguments, so this never shadows a real render
+    if std::env::args()
+        .nth(1)
+        .is_some_and(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     // On failure emit nothing: Claude Code keeps the default row rendering.
     // The reason goes to stderr, which `claude --debug` logs.
     if let Err(error) = run() {
@@ -225,10 +236,27 @@ mod tests {
 
         let row = strip_ansi(&render_row(&input.tasks[0], Some(60)));
         assert!(row.contains('\u{2026}'), "{row}");
-        assert!(row.chars().count() <= 60, "{row}");
+        assert!(row.width() <= 60, "{row}");
 
         let row = strip_ansi(&render_row(&input.tasks[0], Some(30)));
         assert!(!row.contains("long"), "{row}");
+    }
+
+    #[test]
+    fn wide_characters_stay_within_the_row_budget() {
+        let mut task = explore();
+        task["name"] = json!("調査");
+        task["label"] = json!("リポジトリ全体のソースコードを検索しています 🔍🔍🔍");
+        let input = parse(&json!({ "tasks": [task] }));
+
+        for columns in [40, 50, 60, 80] {
+            let row = strip_ansi(&render_row(&input.tasks[0], Some(columns)));
+            assert!(
+                row.width() <= columns,
+                "{columns}: {row} is {} cells",
+                row.width()
+            );
+        }
     }
 
     #[test]

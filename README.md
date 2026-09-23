@@ -120,6 +120,12 @@ cargo build --release
 cp target/release/claude_statusline target/release/claude_subagent_statusline ~/.claude/
 ```
 
+To check what's installed:
+
+```sh
+~/.claude/claude_statusline --version
+```
+
 ## Releasing
 
 Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) when a `v*`
@@ -128,13 +134,21 @@ and the crate version disagree.
 
 ```sh
 cargo build --release   # refresh Cargo.lock, which CI installs with --locked
-git commit -am "Release v0.9.0"
-git tag -a v0.9.0 -m "v0.9.0"
+git commit -am "Release v1.0.1"
+git tag -a v1.0.1 -m "v1.0.1"
 git push origin master --follow-tags
 ```
 
-Each platform job zips both binaries together, and the release job publishes every zip plus a
-`SHA256SUMS` file with auto-generated release notes.
+The workflow runs the full CI suite first and builds nothing unless it passes. Each platform job
+then zips both binaries together, and the release job publishes every zip plus a `SHA256SUMS` file
+with auto-generated release notes.
+
+To rehearse a release without publishing, for example after changing the workflow, run it by hand.
+It tests, builds and packages every platform, then stops before creating the release:
+
+```sh
+gh workflow run release.yml --ref master
+```
 
 ## Configure Claude Code
 

@@ -35,4 +35,4 @@ cargo +1.88 test                            # the declared rust-version
 
 ## Releasing
 
-Bump `version` in `Cargo.toml`, run `cargo build --release` to refresh `Cargo.lock` (CI builds with `--locked`), then push a `v*` tag. `.github/workflows/release.yml` refuses to build if the tag and the crate version disagree.
+Bump `version` in `Cargo.toml`, run `cargo build --release` to refresh `Cargo.lock` (CI builds with `--locked`), then push a `v*` tag. `.github/workflows/release.yml` calls `ci.yml` first, and refuses to build if CI fails or if the tag and the crate version disagree. `gh workflow run release.yml --ref master` is a dry run: it builds and packages every platform but doesn't publish.

@@ -2,10 +2,12 @@ name: CI
 
 # Lint and test every push to master and every pull request. The MSRV job
 # builds with the rust-version from Cargo.toml, so the declared minimum stays true.
+# release.yml also calls this workflow, so nothing ships without passing it.
 on:
   push:
     branches: [master]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -18,7 +20,7 @@ jobs:
     name: fmt + clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Update stable toolchain
         run: rustup update stable --no-self-update && rustup component add rustfmt clippy
@@ -37,7 +39,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Update stable toolchain
         run: rustup update stable --no-self-update
@@ -49,7 +51,7 @@ jobs:
     name: test (MSRV)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the declared minimum toolchain
         run: |

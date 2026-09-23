@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::fmt::Write as _;
-use unicode_width::UnicodeWidthStr as _;
+use unicode_width::{UnicodeWidthChar as _, UnicodeWidthStr as _};
 
 const LEFT_ROUND: &str = "\u{e0b6}";
 const RIGHT_ARROW: &str = "\u{e0b0}";
@@ -247,15 +247,28 @@ pub fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Truncate to `max` characters, appending an ellipsis when shortened.
+/// Truncate to at most `max` terminal cells, appending an ellipsis when shortened.
+///
+/// Wide characters (CJK, most emoji) take two cells, so counting chars would overflow.
 pub fn truncate(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
+    if text.width() <= max {
         return text.to_string();
     }
     if max <= 1 {
         return "\u{2026}".to_string();
     }
-    let mut out: String = text.chars().take(max - 1).collect();
+    // Leave one cell for the ellipsis
+    let budget = max - 1;
+    let mut out = String::new();
+    let mut used = 0;
+    for c in text.chars() {
+        let cells = c.width().unwrap_or(0);
+        if used + cells > budget {
+            break;
+        }
+        used += cells;
+        out.push(c);
+    }
     out.push('\u{2026}');
     out
 }

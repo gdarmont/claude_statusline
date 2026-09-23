@@ -154,6 +154,28 @@ fn subagent_writes_one_json_line_per_parseable_task() {
 }
 
 #[test]
+fn version_flag_prints_the_crate_version_without_reading_stdin() {
+    for (bin, name) in [
+        (STATUSLINE, "claude_statusline"),
+        (SUBAGENT, "claude_subagent_statusline"),
+    ] {
+        for flag in ["--version", "-V"] {
+            // Empty stdin: a binary that rendered instead would print `[statusline]` or nothing
+            let output = Command::new(bin)
+                .arg(flag)
+                .stdin(Stdio::null())
+                .output()
+                .expect("binary runs");
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                format!("{name} {}\n", env!("CARGO_PKG_VERSION"))
+            );
+        }
+    }
+}
+
+#[test]
 fn subagent_emits_nothing_on_bad_input_so_defaults_stay() {
     let out = run(SUBAGENT, "not json", &[]);
     assert!(out.stdout.is_empty());

@@ -458,6 +458,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() {
+    // Claude Code passes no arguments, so this never shadows a real render
+    if std::env::args()
+        .nth(1)
+        .is_some_and(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     // Keep a visible placeholder on screen; the reason goes to stderr, which `claude --debug` logs.
     if let Err(error) = run() {
         eprintln!("claude_statusline: {error}");
@@ -650,6 +659,13 @@ mod tests {
         assert_eq!(truncate("hello world", 5), "hell\u{2026}");
         assert_eq!(truncate("hi", 5), "hi");
         assert_eq!(truncate("hello", 1), "\u{2026}");
+        // Wide characters take two cells each
+        assert_eq!(truncate("日本語テキスト", 5), "日本\u{2026}");
+        assert_eq!(
+            truncate("\u{1f680}\u{1f680}\u{1f680}", 4),
+            "\u{1f680}\u{2026}"
+        );
+        assert_eq!(truncate("日本", 4), "日本");
     }
 
     #[test]
