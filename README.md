@@ -7,65 +7,40 @@ A powerline-style statusline renderer for [Claude Code](https://code.claude.com/
  Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k  cache 91% 42m00s   $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
 ```
 
-Reading the example, left to right:
-
-**Row 1: where you are**
-
-- `claude_statusline`: the current directory. Click it to open the repository.
-- ` master`: the git branch you're on.
-- `⧉ my-feature ← master`: you're in the worktree `my-feature`, which was created from `master`.
-- `PR #1234 approved`: the open pull request for this branch and its review status. Click it to open the PR. GitLab merge requests show as `MR !1234`.
-- `session-name`: the session's name, from `--name`, `/rename` or an AI-generated title.
-
-**Row 2: how the session is going**
-
-- `Opus`: the model.
-- `⚡`: fast mode is on.
-- `✻`: extended thinking is on.
-- `high`: the reasoning effort level.
-- `security-reviewer`: the agent the session runs as.
-- `+156/-23`: lines added and removed during the session.
-- `37%`: how full the context window is.
-- `74k/200k`: tokens in the context window, out of its size.
-- `↺61k`: tokens the last request read from the prompt cache.
-- `cache 91%`: the prompt cache is warm, and 91% of input tokens this session were served from it.
-- `42m00s`: time before the cache expires. Once it expires, the segment reads `cache cold ↻45k`, the number of tokens your next message has to re-cache.
-- `$0.42`: estimated session cost.
-- `12m34s`: how long the session has been running.
-- `5h 24% (2h13m)`: 24% of the 5-hour rate limit is used, and it resets in 2h13m.
-- `7d 41% (3d5h)`: the same for the 7-day limit.
-- `spend 63% (12d0h)`: not in the example. It appears only behind a Claude apps gateway that sets a spend limit, showing the share of the limit used and time until it resets.
-
 The output is two rows: the first says *where* you are working, the second says *how* the session is going. Every section is hidden when its data is absent, so a fresh session in a plain directory renders just the directory and the model.
 
 Each row is split into a left group and a right group pinned to the right edge, so spend and rate limits keep a fixed screen position instead of drifting as the left side grows.
 
 ## Sections
 
+Each table entry is one section of the example above, listed left to right.
+
 ### Row 1 — location
 
-| Section | Color | Description |
-|---------|-------|-------------|
-| Directory | Blue | Current directory name. Clickable (OSC 8) link to the remote repo when `workspace.repo` is present |
-| Git branch | Green | `worktree.branch` when available, otherwise `git branch --show-current` in the workspace directory |
-| Worktree | Teal | `--worktree` session or linked git worktree, with the branch it came from |
-| Pull request | State-colored | Open PR for the current branch, clickable. `MR !n` for a GitLab merge request. Green approved / red changes requested / yellow pending / slate draft |
-| Session name | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
+| Section | Example | Color | Description |
+|---------|---------|-------|-------------|
+| Directory | `claude_statusline` | Blue | Current directory name. Clickable (OSC 8) link to the remote repo when `workspace.repo` is present |
+| Git branch | ` master` | Green | Branch you're on: `worktree.branch` when available, otherwise `git branch --show-current` in the workspace directory |
+| Worktree | `⧉ my-feature ← master` | Teal | Worktree name (`--worktree` session or linked git worktree), then `←` and the branch it was created from |
+| Pull request | `PR #1234 approved` | State-colored | Open PR for the current branch and its review state, clickable. `MR !1234` for a GitLab merge request. Green approved / red changes requested / yellow pending / slate draft |
+| Session name | `session-name` | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
 
 ### Row 2 — session state
 
-| Section | Color | Description |
-|---------|-------|-------------|
-| Model | Gray | Model name, plus `⚡` fast mode, `✻` thinking, and the reasoning effort level |
-| Agent | Orange | Active agent name (`--agent` or agent settings) |
-| Lines changed | Olive | `+added/-removed` for the session |
-| Context | Green / Yellow / Red | Usage percentage, `used/total` tokens, `↺` cache reads, `200k+` marker |
-| Prompt cache | Cyan / Yellow / Slate | Warm: session hit ratio and time until the cache expires, yellow in the last fifth of its TTL. Cold: `↻` tokens the next request re-caches. Hidden when caching isn't observed |
-| Cost | Purple | **Right-aligned.** Session cost in USD (hidden below $0.01) |
-| Duration | Indigo | **Right-aligned.** Wall-clock session time |
-| Rate limits | Green / Yellow / Red | **Right-aligned.** 5-hour and 7-day subscription usage, plus the gateway `spend` limit, each with time until reset |
+| Section | Example | Color | Description |
+|---------|---------|-------|-------------|
+| Model | `Opus ⚡ ✻ high` | Gray | Model name, then `⚡` when fast mode is on, `✻` when extended thinking is on, and the reasoning effort level |
+| Agent | `security-reviewer` | Orange | Agent the session runs as (`--agent` or agent settings) |
+| Lines changed | `+156/-23` | Olive | Lines added and removed during the session |
+| Context | `37% 74k/200k ↺61k` | Green / Yellow / Red | How full the context window is, tokens used out of its size, and `↺` tokens the last request read from the prompt cache. A `200k+` marker appears past 200k tokens |
+| Prompt cache | `cache 91% 42m00s` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and time until it expires; yellow in the last fifth of its TTL. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed |
+| Cost | `$0.42` | Purple | **Right-aligned.** Estimated session cost in USD (hidden below $0.01) |
+| Duration | `12m34s` | Indigo | **Right-aligned.** How long the session has been running |
+| 5-hour limit | `5h 24% (2h13m)` | Green / Yellow / Red | **Right-aligned.** Share of the 5-hour subscription limit used, and time until it resets |
+| 7-day limit | `7d 41% (3d5h)` | Green / Yellow / Red | **Right-aligned.** The same for the 7-day limit |
+| Spend limit | `spend 63% (12d0h)` | Green / Yellow / Red | **Right-aligned.** Not in the example: appears only behind a Claude apps gateway that sets a spend limit. Share used, which can pass 100%, and time until it resets |
 
-Threshold colors for context and rate limits (the spend limit can go past 100%):
+Threshold colors for context and rate limits:
 - **Green** -- 0-59%
 - **Yellow** -- 60-80%
 - **Red** -- above 80%
