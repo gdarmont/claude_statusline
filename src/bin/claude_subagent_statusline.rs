@@ -3,6 +3,8 @@
 //! Reads every visible task as a single JSON object on stdin and writes one
 //! `{"id": ..., "content": ...}` line per row it wants to override.
 
+#[path = "../lenient.rs"]
+mod lenient;
 #[path = "../render.rs"]
 mod render;
 
@@ -20,8 +22,10 @@ const MIN_DETAIL_WIDTH: usize = 8;
 #[derive(Deserialize)]
 struct Input {
     /// Usable row width, as reported by Claude Code.
+    #[serde(default, deserialize_with = "lenient::option")]
     columns: Option<usize>,
-    #[serde(default)]
+    /// A task that fails to parse keeps its default rendering; the others still render.
+    #[serde(default, deserialize_with = "lenient::vec")]
     tasks: Vec<Task>,
 }
 
@@ -29,15 +33,23 @@ struct Input {
 #[serde(rename_all = "camelCase")]
 struct Task {
     id: String,
+    #[serde(default, deserialize_with = "lenient::option")]
     name: Option<String>,
+    #[serde(default, deserialize_with = "lenient::option")]
     status: Option<String>,
+    #[serde(default, deserialize_with = "lenient::option")]
     description: Option<String>,
+    #[serde(default, deserialize_with = "lenient::option")]
     label: Option<String>,
     /// Resolved model ID (Claude Code v2.1.205+).
+    #[serde(default, deserialize_with = "lenient::option")]
     model: Option<String>,
     /// Effort level string, or a numeric token budget (v2.1.214+).
+    #[serde(default, deserialize_with = "lenient::option")]
     effort: Option<Effort>,
+    #[serde(default, deserialize_with = "lenient::option")]
     context_window_size: Option<u64>,
+    #[serde(default, deserialize_with = "lenient::option")]
     token_count: Option<u64>,
 }
 
@@ -164,5 +176,88 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 fn main() {
     // On failure emit nothing: Claude Code keeps the default row rendering.
-    let _ = run();
+    // The reason goes to stderr, which `claude --debug` logs.
+    if let Err(error) = run() {
+        eprintln!("claude_subagent_statusline: {error}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use render::strip_ansi;
+    use serde_json::json;
+
+    fn parse(payload: &serde_json::Value) -> Input {
+        serde_json::from_value(payload.clone()).expect("payload parses")
+    }
+
+    fn explore() -> serde_json::Value {
+        json!({
+            "id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
+            "model": "claude-opus-5", "effort": "high",
+            "contextWindowSize": 200_000, "tokenCount": 12_500,
+        })
+    }
+
+    #[test]
+    fn short_model_drops_the_prefix_and_date_suffix() {
+        assert_eq!(short_model("claude-opus-5"), "opus-5");
+        assert_eq!(short_model("claude-haiku-4-5-20251001"), "haiku-4-5");
+        assert_eq!(short_model("gpt-x"), "gpt-x");
+    }
+
+    #[test]
+    fn row_shows_detail_model_and_context_share() {
+        let input = parse(&json!({ "columns": 80, "tasks": [explore()] }));
+        let row = strip_ansi(&render_row(&input.tasks[0], input.columns));
+        assert_eq!(
+            row,
+            "\u{25cf} Explore \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6%"
+        );
+    }
+
+    #[test]
+    fn detail_is_truncated_then_dropped_as_the_row_narrows() {
+        let mut task = explore();
+        task["label"] = json!("a long description of what the agent is doing");
+        let input = parse(&json!({ "tasks": [task] }));
+
+        let row = strip_ansi(&render_row(&input.tasks[0], Some(60)));
+        assert!(row.contains('\u{2026}'), "{row}");
+        assert!(row.chars().count() <= 60, "{row}");
+
+        let row = strip_ansi(&render_row(&input.tasks[0], Some(30)));
+        assert!(!row.contains("long"), "{row}");
+    }
+
+    #[test]
+    fn effort_can_be_a_token_budget() {
+        let mut task = explore();
+        task["effort"] = json!(16_000);
+        let input = parse(&json!({ "tasks": [task] }));
+        let row = strip_ansi(&render_row(&input.tasks[0], None));
+        assert!(row.contains("opus-5 16k"), "{row}");
+    }
+
+    #[test]
+    fn a_malformed_task_is_skipped_and_bad_fields_are_dropped() {
+        let input = parse(&json!({
+            "columns": "wide",
+            "tasks": [
+                explore(),
+                { "name": "no id" },
+                { "id": "t3", "name": "Plan", "tokenCount": "lots" },
+            ],
+        }));
+        assert_eq!(input.columns, None);
+        let ids: Vec<&str> = input.tasks.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["t1", "t3"]);
+        assert_eq!(input.tasks[1].token_count, None);
+    }
+
+    #[test]
+    fn tasks_that_are_not_an_array_render_nothing() {
+        assert!(parse(&json!({ "tasks": { "id": "t1" } })).tasks.is_empty());
+    }
 }

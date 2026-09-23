@@ -4,7 +4,7 @@ A powerline-style statusline renderer for [Claude Code](https://code.claude.com/
 
 ```
  claude_statusline   master  ⧉ my-feature ← master  PR #1234 approved            session-name
- Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k  cache 91% 42m00s   $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
+ Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k  cache 91% 42m   $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
 ```
 
 The output is two rows: the first says *where* you are working, the second says *how* the session is going. Every section is hidden when its data is absent, so a fresh session in a plain directory renders just the directory and the model.
@@ -33,7 +33,7 @@ Each table entry is one section of the example above, listed left to right.
 | Agent | `security-reviewer` | Orange | Agent the session runs as (`--agent` or agent settings) |
 | Lines changed | `+156/-23` | Olive | Lines added and removed during the session |
 | Context | `37% 74k/200k ↺61k` | Green / Yellow / Red | How full the context window is, tokens used out of its size, and `↺` tokens the last request read from the prompt cache. A `200k+` marker appears past 200k tokens |
-| Prompt cache | `cache 91% 42m00s` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and time until it expires; yellow in the last fifth of its TTL. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed |
+| Prompt cache | `cache 91% 42m` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and minutes until it expires (seconds in the last minute); yellow in the last fifth of its TTL. Needs `refreshInterval` to count down while idle. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed |
 | Cost | `$0.42` | Purple | **Right-aligned.** Estimated session cost in USD (hidden below $0.01) |
 | Duration | `12m34s` | Indigo | **Right-aligned.** How long the session has been running |
 | 5-hour limit | `5h 24% (2h13m)` | Green / Yellow / Red | **Right-aligned.** Share of the 5-hour subscription limit used, and time until it resets |
@@ -69,7 +69,7 @@ To move a section between sides, move its `Section::new(...)` push between the `
 
 ## Requirements
 
-- Rust 1.85+
+- Rust 1.88+
 - A terminal with true color (24-bit) support
 - A font with powerline glyphs (e.g. Nerd Font)
 - Clickable PR and repo links need a terminal with OSC 8 support (Ghostty, iTerm2, Kitty, WezTerm)
@@ -145,7 +145,8 @@ In `~/.claude/settings.json`:
   "statusLine": {
     "type": "command",
     "command": "~/.claude/claude_statusline",
-    "padding": 0
+    "padding": 0,
+    "refreshInterval": 15
   },
   "subagentStatusLine": {
     "type": "command",
@@ -155,6 +156,12 @@ In `~/.claude/settings.json`:
 ```
 
 Restart Claude Code for the change to take effect.
+
+`refreshInterval` re-runs the status line every 15 seconds on top of Claude Code's own triggers,
+which fire on events such as a new message or `/compact`. Without it, nothing redraws while you're
+idle: the prompt cache countdown freezes at its last value, and the cache never turns yellow as it
+nears expiry, which is exactly when you'd want to see it. The binary finishes in a few
+milliseconds, so the cost is negligible.
 
 ## Input format
 
@@ -234,7 +241,21 @@ Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6%`, wit
 truncated to fit `columns` and dropped entirely when there is no room for it. `model` and
 `contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
 
-## Testing manually
+## Testing
+
+```sh
+cargo test
+```
+
+Unit tests sit next to the code in each binary. `tests/cli.rs` runs the built binaries end to
+end, JSON on stdin, the way Claude Code does. CI runs formatting, clippy with warnings as errors,
+and the tests on Linux and macOS, plus a build on the `rust-version` from `Cargo.toml`.
+
+A field whose type changes in a new Claude Code release is treated as absent, so only its section
+disappears. If the whole line shows `[statusline]` instead, the payload itself couldn't be parsed;
+the reason is on stderr, which `claude --debug` logs.
+
+To try a payload by hand:
 
 ```sh
 echo '{"workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Opus"}}' \

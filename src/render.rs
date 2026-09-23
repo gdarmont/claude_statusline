@@ -19,7 +19,7 @@ pub const WARNING_THRESHOLD: f64 = 59.0;
 /// Usage above this percentage is rendered as danger.
 pub const DANGER_THRESHOLD: f64 = 80.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
@@ -159,18 +159,27 @@ fn right_margin() -> usize {
         .unwrap_or(DEFAULT_RIGHT_MARGIN)
 }
 
-/// Render `left` flush left and `right` flush right on a single row.
+/// Render `left` flush left and `right` flush right on a single row, sized from the environment.
+pub fn format_row(left: Vec<Section>, right: Vec<Section>) -> String {
+    let usable = terminal_columns().map(|columns| columns.saturating_sub(right_margin()));
+    format_row_within(left, right, usable)
+}
+
+/// Render `left` flush left and `right` flush right within `usable` cells.
 ///
 /// Falls back to one continuous powerline when the width is unknown or the two
 /// groups would collide, so a narrow terminal degrades instead of wrapping.
-pub fn format_row(mut left: Vec<Section>, right: Vec<Section>) -> String {
+pub fn format_row_within(
+    mut left: Vec<Section>,
+    right: Vec<Section>,
+    usable: Option<usize>,
+) -> String {
     if right.is_empty() {
         return format_sections(&left);
     }
 
     let total = group_width(&left) + group_width(&right);
-    if let Some(columns) = terminal_columns() {
-        let usable = columns.saturating_sub(right_margin());
+    if let Some(usable) = usable {
         // Strictly less, so there is always at least one cell of daylight.
         if total < usable {
             return format!(
@@ -248,5 +257,38 @@ pub fn truncate(text: &str, max: usize) -> String {
     }
     let mut out: String = text.chars().take(max - 1).collect();
     out.push('\u{2026}');
+    out
+}
+
+/// Drop ANSI styling and OSC 8 hyperlinks, leaving the text a terminal would show.
+#[cfg(test)]
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::new();
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            // CSI: parameters up to a final byte such as `m`
+            Some('[') => {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            // OSC, used for hyperlinks: up to the BEL terminator
+            Some(']') => {
+                for c in chars.by_ref() {
+                    if c == '\x07' {
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     out
 }
