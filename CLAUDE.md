@@ -36,6 +36,10 @@ cargo +1.88 test                            # the declared rust-version
 - When a section, input field or env var changes, update `README.md` to match.
 - `README.md` § Input format records the Claude Code version both schemas were last checked against. Bump it whenever you re-check them. The installed `claude` binary embeds the `statusLine` schema with comments, in the statusline-setup agent prompt (search it for `recache_tokens_if_cold`). The subagent payload is built next to the `subagentStatusLine` string (search for `tokenSamples`).
 
+## Commits
+
+Group commits by linked changes: one commit per logical change (a fix, a feature, a CI tweak), carrying its own tests and docs. Unrelated changes go in separate commits, even when they're made in the same session or touch the same file.
+
 ## Releasing
 
 Bump `version` in `Cargo.toml`, run `cargo build --release` to refresh `Cargo.lock` (CI builds with `--locked`), then push a `v*` tag. `.github/workflows/release.yml` calls `ci.yml` first, and refuses to build if CI fails or if the tag and the crate version disagree. `gh workflow run release.yml --ref master` is a dry run: it builds and packages every platform but doesn't publish.
