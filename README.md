@@ -2,6 +2,8 @@
 
 A powerline-style statusline renderer for [Claude Code](https://code.claude.com/docs/en/statusline). It reads session data as JSON from stdin and outputs ANSI-colored, powerline-styled text.
 
+![Both status line rows, right-aligned, above two subagent rows in the agent panel](docs/statusline.png)
+
 ```
  claude_statusline   master  ⧉ my-feature ← master  PR #1234 approved            session-name
  Opus ⚡ ✻ high  security-reviewer  +156/-23  37% 74k/200k ↺61k  cache 91% 42m   $0.42  12m34s  5h 24% (2h13m)  7d 41% (3d5h)
@@ -346,6 +348,10 @@ echo '{"workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Opus"}}'
 echo '{"columns":80,"tasks":[{"id":"t1","name":"Explore","status":"running","tokenCount":12500,"contextWindowSize":200000}]}' \
   | ./target/release/claude_subagent_statusline
 ```
+
+The screenshot at the top comes from the release binaries too. After a visual change, regenerate it
+with `python3 docs/screenshot.py` (needs `cargo build --release`, the MesloLGS NF font, and Chrome
+or Chromium).
 
 ## License
 
