@@ -111,6 +111,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Full history and tags, for the commits since the previous release
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -118,6 +123,24 @@ jobs:
 
       - name: Checksums
         run: cd dist && sha256sum *.zip | tee SHA256SUMS
+
+      # --generate-notes lists pull requests, and commits land on master
+      # directly, so list the commit subjects since the previous tag instead.
+      # A dry run shows what it would publish in the job summary.
+      - name: Release notes
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then from="$GITHUB_REF_NAME^"; else from=HEAD; fi
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$from" 2>/dev/null || true)
+          {
+            git log --no-merges --format='- %s' "${prev:+$prev..}HEAD" \
+              | { grep -v '^- Release v[0-9]' || true; }
+            echo
+            echo "Install or update: [README](https://github.com/$GITHUB_REPOSITORY#install-or-update)"
+            if [ -n "$prev" ]; then
+              echo
+              echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"
+            fi
+          } | tee notes.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create release
         if: github.ref_type == 'tag'
@@ -127,4 +150,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/*.zip dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --notes-file notes.md

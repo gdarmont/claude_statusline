@@ -183,8 +183,9 @@ git push origin master --follow-tags
 ```
 
 The workflow runs the full CI suite first and builds nothing unless it passes. Each platform job
-then zips both binaries together, and the release job publishes every zip plus a `SHA256SUMS` file
-with auto-generated release notes.
+then zips both binaries together, and the release job publishes every zip plus a `SHA256SUMS` file.
+The release notes list the commit subjects since the previous tag, leaving out the `Release vX`
+commits, so write subjects that read as changelog entries.
 
 To rehearse a release without publishing, for example after changing the workflow, run it by hand.
 It tests, builds and packages every platform, then stops before creating the release:

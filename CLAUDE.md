@@ -40,6 +40,8 @@ cargo +1.88 test                            # the declared rust-version
 
 Group commits by linked changes: one commit per logical change (a fix, a feature, a CI tweak), carrying its own tests and docs. Unrelated changes go in separate commits, even when they're made in the same session or touch the same file.
 
+Commit subjects become the release notes (`release.yml` lists them since the previous tag), so write each one as a changelog entry a user would understand.
+
 ## Releasing
 
 Bump `version` in `Cargo.toml`, run `cargo build --release` to refresh `Cargo.lock` (CI builds with `--locked`), then push a `v*` tag. `.github/workflows/release.yml` calls `ci.yml` first, and refuses to build if CI fails or if the tag and the crate version disagree. `gh workflow run release.yml --ref master` is a dry run: it builds and packages every platform but doesn't publish.
