@@ -3,11 +3,14 @@ name: CI
 # Lint and test every push to master and every pull request. The MSRV job
 # builds with the rust-version from Cargo.toml, so the declared minimum stays true.
 # release.yml also calls this workflow, so nothing ships without passing it.
+# The weekly run catches lints from a new stable release before they block one.
 on:
   push:
     branches: [master]
   pull_request:
   workflow_call:
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
