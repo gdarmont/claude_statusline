@@ -7,6 +7,7 @@ Powerline-style status line renderer for Claude Code, in Rust. It reads session 
 - `src/main.rs`: the `claude_statusline` binary. It prints two rows, built by `location_sections` and `session_sections`, and each returns `(left, right)` section vectors.
 - `src/bin/claude_subagent_statusline.rs`: the `claude_subagent_statusline` binary. It prints one `{"id","content"}` JSON line per subagent task.
 - `src/render.rs`: shared colors, `Section`, powerline formatting, width and truncation helpers, and number/duration formatting.
+- `src/update.rs`: the once-a-day release check, used only by `claude_statusline`. The render reads a cached tag; a detached `claude_statusline --check-update <path>` refreshes it with `curl`.
 - `src/lenient.rs`: deserializers that turn a field with an unexpected type into `None` (or drop a bad array element) instead of failing the parse.
 - There is no lib crate. Both binaries pull the shared files in with `mod`, and the subagent binary uses `#[path = "../…"]`.
 - Unit tests sit in a `#[cfg(test)] mod tests` at the bottom of each binary. `render.rs` helpers are tested from `main.rs`, so they don't run twice. `tests/cli.rs` runs the built binaries end to end.
@@ -30,8 +31,10 @@ cargo +1.88 test                            # the declared rust-version
 - Measure width with `unicode-width` (terminal cells), never with `len()` or `chars().count()`. Right alignment depends on it.
 - Right alignment uses the `COLUMNS` env var minus `CLAUDE_STATUSLINE_RIGHT_MARGIN` (default 5). When `COLUMNS` is missing or the groups would overlap, fall back to a single unpadded powerline. Never wrap.
 - On any error, `main` prints `[statusline]`, writes the reason to stderr (which `claude --debug` logs), and exits normally. The subagent binary prints nothing, so Claude Code keeps its default rows. Don't panic, because the release profile uses `panic = "abort"`.
+- Never block the render on the network. Anything slow goes to a detached process with stdout and stderr set to null, because an inherited stdout makes Claude Code wait for it. `tests/cli.rs` turns the update check off unless a test opts back in.
 - `unsafe_code` is forbidden. Keep dependencies minimal: serde, serde_json, unicode-width.
 - When a section, input field or env var changes, update `README.md` to match.
+- `README.md` § Input format records the Claude Code version both schemas were last checked against. Bump it whenever you re-check them. The installed `claude` binary embeds the `statusLine` schema with comments, in the statusline-setup agent prompt (search it for `recache_tokens_if_cold`). The subagent payload is built next to the `subagentStatusLine` string (search for `tokenSamples`).
 
 ## Releasing
 

@@ -1,5 +1,6 @@
 mod lenient;
 mod render;
+mod update;
 
 use render::{
     BLUE, CYAN, GRAY, GREEN, INDIGO, OLIVE, ORANGE, PURPLE, RED, SLATE, Section, TEAL, WHITE,
@@ -144,6 +145,19 @@ struct PromptCache {
     /// Null right after a compaction until the next request.
     #[serde(default, deserialize_with = "lenient::option")]
     recache_tokens_if_cold: Option<u64>,
+    /// Unix seconds of the most recent miss.
+    #[serde(default, deserialize_with = "lenient::option")]
+    last_miss_at: Option<u64>,
+    /// Likely cause of that miss (v2.1.260+).
+    #[serde(default, deserialize_with = "lenient::option")]
+    last_miss_cause: Option<MissCause>,
+}
+
+#[derive(Deserialize)]
+struct MissCause {
+    /// e.g. `tools_changed`, `system_prompt_changed`, `ttl_expired_5m`, `likely_server_side`.
+    #[serde(default, deserialize_with = "lenient::vec")]
+    causes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -152,6 +166,12 @@ struct RateWindow {
     used_percentage: Option<f64>,
     #[serde(default, deserialize_with = "lenient::option")]
     resets_at: Option<u64>,
+    /// `spend_limit` only (v2.1.284+): spend so far and the limit, in USD. Fetched
+    /// separately, so they can lag `used_percentage` by a few minutes.
+    #[serde(default, deserialize_with = "lenient::option")]
+    used_usd: Option<f64>,
+    #[serde(default, deserialize_with = "lenient::option")]
+    limit_usd: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -375,7 +395,14 @@ fn session_sections(input: &Input, now: u64) -> (Vec<Section>, Vec<Section>) {
 
 fn rate_limit_section(label: &str, window: &RateWindow, now: u64) -> Option<Section> {
     let pct = window.used_percentage?;
-    let mut text = format!("{label} {}%", pct.round() as u64);
+    // Dollars when the gateway reports them; the color still follows the fresher percentage
+    let usage = match (window.used_usd, window.limit_usd) {
+        (Some(used), Some(limit)) if limit > 0.0 => {
+            format!("{}/{}", fmt_usd(used), fmt_usd(limit))
+        }
+        _ => format!("{}%", pct.round() as u64),
+    };
+    let mut text = format!("{label} {usage}");
 
     if let Some(resets_at) = window.resets_at
         && resets_at > now
@@ -387,6 +414,15 @@ fn rate_limit_section(label: &str, window: &RateWindow, now: u64) -> Option<Sect
     Some(Section::new(text, bg, fg))
 }
 
+/// Whole dollars, or cents below $10 where they still matter: `$271`, `$4.20`.
+fn fmt_usd(usd: f64) -> String {
+    if usd < 10.0 {
+        format!("${usd:.2}")
+    } else {
+        format!("${usd:.0}")
+    }
+}
+
 /// Cache countdown: seconds in the last minute, whole minutes before that.
 ///
 /// Between events the line only redraws on `refreshInterval`, so seconds would be false precision.
@@ -396,6 +432,24 @@ fn fmt_cache_countdown(secs: u64) -> String {
     } else {
         format!("{}m", secs / 60)
     }
+}
+
+/// Likely cause of the last miss, while the last request is that miss.
+///
+/// A miss rewrites the cache, so it shows on a warm cache, and a cold cache is an idle
+/// expiry the last cause doesn't explain. `expires_at` is the last request's time plus
+/// the TTL, rounded up, and `last_miss_at` is rounded down, so they agree within a second.
+fn last_request_miss_cause(cache: &PromptCache, ttl_secs: u64) -> Option<&str> {
+    let last_request_at = cache.expires_at?.checked_sub(ttl_secs)?;
+    if last_request_at.saturating_sub(cache.last_miss_at?) > 1 {
+        return None;
+    }
+    cache
+        .last_miss_cause
+        .as_ref()?
+        .causes
+        .first()
+        .map(String::as_str)
 }
 
 /// Warm: hit ratio and time until the cached prefix expires. Cold: what the next request re-caches.
@@ -420,17 +474,21 @@ fn prompt_cache_section(cache: &PromptCache, now: u64) -> Option<Section> {
         return Some(Section::new(text, SLATE, WHITE));
     };
 
+    let ttl_secs = match cache.ttl.as_deref() {
+        Some("1h") => 3_600,
+        _ => 300,
+    };
+
     let mut text = "cache".to_string();
     if let Some(ratio) = cache.hit_ratio {
         let _ = write!(text, " {}%", (ratio * 100.0).round() as u64);
     }
     let _ = write!(text, " {}", fmt_cache_countdown(remaining));
+    if let Some(cause) = last_request_miss_cause(cache, ttl_secs) {
+        let _ = write!(text, " miss: {}", cause.replace('_', " "));
+    }
 
     // Yellow in the last fifth of the TTL: send soon or pay to rebuild
-    let ttl_secs = match cache.ttl.as_deref() {
-        Some("1h") => 3_600,
-        _ => 300,
-    };
     let (bg, fg) = if remaining * 5 <= ttl_secs {
         (YELLOW, render::BLACK)
     } else {
@@ -439,17 +497,29 @@ fn prompt_cache_section(cache: &PromptCache, now: u64) -> Option<Section> {
     Some(Section::new(text, bg, fg))
 }
 
+/// Newer release than this build, from the once-a-day check's cache.
+fn update_notice(now: u64) -> Option<Section> {
+    let var = |name: &str| std::env::var(name).ok();
+    if !update::enabled(var) {
+        return None;
+    }
+    let latest = update::latest_release(&update::cache_path(var)?, now)?;
+    update::notice(&latest, env!("CARGO_PKG_VERSION"))
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut input_str = String::new();
     std::io::stdin().read_to_string(&mut input_str)?;
     let input: Input = serde_json::from_str(&input_str)?;
+    let now = unix_now();
 
-    let (left, right) = location_sections(&input);
+    let (left, mut right) = location_sections(&input);
+    right.extend(update_notice(now));
     if !left.is_empty() || !right.is_empty() {
         println!("{}", format_row(left, right));
     }
 
-    let (left, right) = session_sections(&input, unix_now());
+    let (left, right) = session_sections(&input, now);
     if !left.is_empty() || !right.is_empty() {
         println!("{}", format_row(left, right));
     }
@@ -458,13 +528,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() {
-    // Claude Code passes no arguments, so this never shadows a real render
-    if std::env::args()
-        .nth(1)
-        .is_some_and(|arg| arg == "--version" || arg == "-V")
-    {
-        println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"));
-        return;
+    // Claude Code passes no arguments, so these never shadow a real render
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        Some("--version" | "-V") => {
+            println!("{} {}", env!("CARGO_BIN_NAME"), env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Some(update::CHECK_FLAG) => {
+            // Detached with stderr discarded, so a failed check just waits for tomorrow;
+            // the message is for running it by hand
+            if let Some(path) = args.next()
+                && let Err(error) = update::check(Path::new(&path))
+            {
+                eprintln!("claude_statusline: update check failed: {error}");
+            }
+            return;
+        }
+        _ => {}
     }
 
     // Keep a visible placeholder on screen; the reason goes to stderr, which `claude --debug` logs.
@@ -548,6 +629,36 @@ mod tests {
     }
 
     #[test]
+    fn miss_cause_shows_until_the_next_request() {
+        // 5m TTL: the last request was at NOW - 60, as `expires_at` and `last_miss_at` round
+        let after_miss = |last_miss_at: u64| {
+            cache(json!({
+                "warm": true, "caching_observed": true, "ttl": "5m",
+                "expires_at": NOW + 240, "hit_ratio": 0.62,
+                "last_miss_at": last_miss_at,
+                "last_miss_cause": { "causes": ["tools_changed", "unknown"], "tools_added": 2 },
+            }))
+        };
+        assert_eq!(
+            after_miss(NOW - 61).text,
+            "cache 62% 4m miss: tools changed"
+        );
+        assert_eq!(
+            after_miss(NOW - 60).text,
+            "cache 62% 4m miss: tools changed"
+        );
+        // An earlier miss, followed by a request that hit
+        assert_eq!(after_miss(NOW - 62).text, "cache 62% 4m");
+
+        // Expired since the miss: idle time, not the miss, is why it is cold now
+        let cold = cache(json!({
+            "warm": false, "caching_observed": true, "ttl": "5m", "expires_at": NOW - 10,
+            "last_miss_at": NOW - 310, "last_miss_cause": { "causes": ["model_changed"] },
+        }));
+        assert_eq!(cold.text, "cache cold");
+    }
+
+    #[test]
     fn cache_is_hidden_when_caching_is_not_observed() {
         let input = input(json!({ "prompt_cache": { "warm": false, "caching_observed": false } }));
         assert!(prompt_cache_section(input.prompt_cache.as_ref().unwrap(), NOW).is_none());
@@ -566,6 +677,32 @@ mod tests {
             ["5h 24% (2h13m)", "7d 41%", "spend 104% (12d0h)"]
         );
         assert_eq!(right[2].bg, RED);
+    }
+
+    #[test]
+    fn spend_limit_shows_dollars_when_the_gateway_reports_them() {
+        let spend = |window: Value| {
+            let input = input(json!({ "rate_limits": { "spend_limit": window } }));
+            let (_, right) = session_sections(&input, NOW);
+            (right[0].text.clone(), right[0].bg)
+        };
+        // Colored by the percentage, which is fresher than the dollar amounts
+        assert_eq!(
+            spend(json!({
+                "used_percentage": 62.8, "resets_at": NOW + 12 * 86_400,
+                "used_usd": 271.4, "limit_usd": 500.0, "period": "monthly",
+            })),
+            ("spend $271/$500 (12d0h)".to_string(), YELLOW)
+        );
+        assert_eq!(
+            spend(json!({ "used_percentage": 21.0, "used_usd": 4.2, "limit_usd": 20 })),
+            ("spend $4.20/$20".to_string(), GREEN)
+        );
+        // Older gateways send the percentage alone
+        assert_eq!(
+            spend(json!({ "used_percentage": 21.0, "used_usd": 4.2 })).0,
+            "spend 21%"
+        );
     }
 
     #[test]
@@ -615,6 +752,90 @@ mod tests {
 
         let (left, _) = location_sections(&input);
         assert_eq!(texts(&left), ["demo", "PR"]);
+    }
+
+    #[test]
+    fn update_notice_shows_only_for_a_newer_release() {
+        let notice = update::notice("v1.2.0", "1.1.9").expect("newer");
+        assert_eq!(notice.text, "\u{2191} v1.2.0");
+        assert_eq!(
+            notice.url.as_deref(),
+            Some("https://github.com/gdarmont/claude_statusline/releases/tag/v1.2.0")
+        );
+        // Compared as numbers, not strings
+        assert!(update::notice("v1.10.0", "1.9.0").is_some());
+        assert!(update::notice("v1.1.9", "1.1.9").is_none());
+        assert!(update::notice("v1.0.0", "1.1.9").is_none());
+        assert!(update::notice("garbage", "1.1.9").is_none());
+    }
+
+    #[test]
+    fn versions_parse_strictly() {
+        assert_eq!(update::parse_version("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(update::parse_version("1.2.3"), Some((1, 2, 3)));
+        for bad in [
+            "v1.2",
+            "v1.2.3.4",
+            "v1.2.3-rc1",
+            "v1.+2.3",
+            "v1..3",
+            "",
+            "v1.2.3\x1b[0m",
+        ] {
+            assert_eq!(update::parse_version(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn update_check_runs_once_a_day() {
+        assert!(update::is_due(None, NOW));
+        assert!(!update::is_due(Some(NOW - 86_399), NOW));
+        assert!(update::is_due(Some(NOW - 86_400), NOW));
+        // Cache stamped ahead of the clock: wait rather than check on every render
+        assert!(!update::is_due(Some(NOW + 60), NOW));
+    }
+
+    #[test]
+    fn update_check_respects_opt_outs() {
+        let with = |pairs: &'static [(&str, &str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_string())
+            }
+        };
+        assert!(update::enabled(with(&[])));
+        assert!(update::enabled(with(&[(
+            "CLAUDE_STATUSLINE_UPDATE_CHECK",
+            "1"
+        )])));
+        assert!(!update::enabled(with(&[(
+            "CLAUDE_STATUSLINE_UPDATE_CHECK",
+            "0"
+        )])));
+        assert!(!update::enabled(with(&[(
+            "CLAUDE_STATUSLINE_UPDATE_CHECK",
+            "off"
+        )])));
+        assert!(!update::enabled(with(&[(
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "1"
+        )])));
+        assert!(update::enabled(with(&[(
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+            "0"
+        )])));
+
+        assert_eq!(
+            update::cache_path(with(&[("HOME", "/home/u")])),
+            Some("/home/u/.claude/claude_statusline.update".into())
+        );
+        assert_eq!(
+            update::cache_path(with(&[("HOME", "/home/u"), ("CLAUDE_CONFIG_DIR", "/cfg")])),
+            Some("/cfg/claude_statusline.update".into())
+        );
+        assert_eq!(update::cache_path(with(&[])), None);
     }
 
     #[test]

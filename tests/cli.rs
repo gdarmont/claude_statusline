@@ -1,6 +1,8 @@
 //! End-to-end: run the built binaries the way Claude Code does, JSON on stdin.
 
+use std::fs;
 use std::io::Write as _;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use unicode_width::UnicodeWidthStr as _;
 
@@ -16,6 +18,10 @@ fn run(bin: &str, stdin: &str, env: &[(&str, &str)]) -> Output {
     let mut child = Command::new(bin)
         .env_remove("COLUMNS")
         .env_remove("CLAUDE_STATUSLINE_RIGHT_MARGIN")
+        .env_remove("CLAUDE_CONFIG_DIR")
+        .env_remove("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+        // Tests opt back in, so none of them reach the network or the real ~/.claude
+        .env("CLAUDE_STATUSLINE_UPDATE_CHECK", "0")
         .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -126,6 +132,61 @@ fn right_group_ends_at_columns_minus_the_margin() {
     assert_eq!(session_row(&no_margin).width(), 120);
     // Width unknown: no padding at all
     assert!(!session_row(&[]).contains("  "));
+}
+
+/// An empty scratch directory standing in for `~/.claude`.
+fn config_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("claude_statusline-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("scratch directory");
+    dir
+}
+
+#[test]
+fn a_cached_newer_release_is_announced_on_the_first_row() {
+    let dir = config_dir("update-notice");
+    let config = dir.to_str().expect("utf-8 path");
+    // Just written, so the check isn't due and nothing reaches the network
+    fs::write(dir.join("claude_statusline.update"), "v99.0.0\n").expect("seed cache");
+
+    let on = [
+        ("CLAUDE_CONFIG_DIR", config),
+        ("CLAUDE_STATUSLINE_UPDATE_CHECK", "1"),
+    ];
+    let out = run(STATUSLINE, MINIMAL, &on);
+    assert!(
+        visible_lines(&out.stdout)[0].contains("\u{2191} v99.0.0"),
+        "{}",
+        out.stdout
+    );
+    assert!(
+        out.stdout.contains("/releases/tag/v99.0.0"),
+        "{}",
+        out.stdout
+    );
+
+    let off = [("CLAUDE_CONFIG_DIR", config)];
+    assert!(!run(STATUSLINE, MINIMAL, &off).stdout.contains("v99"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_due_check_is_claimed_then_left_to_the_background() {
+    let dir = config_dir("update-due");
+    let cache = dir.join("claude_statusline.update");
+    // No curl on PATH: the background check fails without touching the network
+    let env = [
+        ("CLAUDE_CONFIG_DIR", dir.to_str().expect("utf-8 path")),
+        ("CLAUDE_STATUSLINE_UPDATE_CHECK", "1"),
+        ("PATH", ""),
+    ];
+    let out = run(STATUSLINE, MINIMAL, &env);
+    assert_eq!(visible_lines(&out.stdout).len(), 2, "{}", out.stdout);
+    // Stamped before the check starts, so the next renders don't start their own
+    assert_eq!(fs::read_to_string(&cache).expect("cache claimed"), "");
+
+    let _ = fs::remove_dir_all(&dir);
 }
 
 #[test]

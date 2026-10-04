@@ -24,6 +24,7 @@ Each table entry is one section of the example above, listed left to right.
 | Worktree | `⧉ my-feature ← master` | Teal | Worktree name (`--worktree` session or linked git worktree), then `←` and the branch it was created from |
 | Pull request | `PR #1234 approved` | State-colored | Open PR for the current branch and its review state, clickable. `MR !1234` for a GitLab merge request. Green approved / red changes requested / yellow pending / slate draft |
 | Session name | `session-name` | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
+| Update | `↑ v1.0.2` | Orange | **Right-aligned.** Only when a newer release is out, linked to its release page. See [Update check](#update-check) |
 
 ### Row 2 — session state
 
@@ -33,12 +34,12 @@ Each table entry is one section of the example above, listed left to right.
 | Agent | `security-reviewer` | Orange | Agent the session runs as (`--agent` or agent settings) |
 | Lines changed | `+156/-23` | Olive | Lines added and removed during the session |
 | Context | `37% 74k/200k ↺61k` | Green / Yellow / Red | How full the context window is, tokens used out of its size, and `↺` tokens the last request read from the prompt cache. A `200k+` marker appears past 200k tokens |
-| Prompt cache | `cache 91% 42m` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and minutes until it expires (seconds in the last minute); yellow in the last fifth of its TTL. Needs `refreshInterval` to count down while idle. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed |
+| Prompt cache | `cache 91% 42m` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and minutes until it expires (seconds in the last minute); yellow in the last fifth of its TTL. Needs `refreshInterval` to count down while idle. After a request that missed the cache, `miss: tools changed` names the likely cause until the next request. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed |
 | Cost | `$0.42` | Purple | **Right-aligned.** Estimated session cost in USD (hidden below $0.01) |
 | Duration | `12m34s` | Indigo | **Right-aligned.** How long the session has been running |
 | 5-hour limit | `5h 24% (2h13m)` | Green / Yellow / Red | **Right-aligned.** Share of the 5-hour subscription limit used, and time until it resets |
 | 7-day limit | `7d 41% (3d5h)` | Green / Yellow / Red | **Right-aligned.** The same for the 7-day limit |
-| Spend limit | `spend 63% (12d0h)` | Green / Yellow / Red | **Right-aligned.** Not in the example: appears only behind a Claude apps gateway that sets a spend limit. Share used, which can pass 100%, and time until it resets |
+| Spend limit | `spend 63% (12d0h)` | Green / Yellow / Red | **Right-aligned.** Not in the example: appears only behind a Claude apps gateway that sets a spend limit. Spend so far out of the limit (`spend $271/$500`), or the share used when the gateway doesn't report dollars, and time until it resets. Colored by the share used, which can pass 100% |
 
 Threshold colors for context and rate limits:
 - **Green** -- 0-59%
@@ -67,12 +68,38 @@ gap looks too wide:
 To move a section between sides, move its `Section::new(...)` push between the `sections` and
 `right` vectors in `location_sections` / `session_sections` in `src/main.rs`.
 
+### Update check
+
+Once a day, the status line checks GitHub for a newer release and, when there is one, shows
+`↑ v1.0.2` at the right of the first row, linked to its release page. Re-run the
+[install command](#install) to update; nothing is installed automatically.
+
+The check never slows the status line down. Each render only reads the tag cached in
+`~/.claude/claude_statusline.update` (`$CLAUDE_CONFIG_DIR` when set). When that file is a day old,
+the render starts a detached `claude_statusline --check-update`, which follows the
+`/releases/latest` redirect with `curl`, as `install.sh` does, and writes the tag back. A failed
+check waits a day before the next try.
+
+To turn it off, set `CLAUDE_STATUSLINE_UPDATE_CHECK` to `0`. It is also off when
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set.
+
+```json
+{ "env": { "CLAUDE_STATUSLINE_UPDATE_CHECK": "0" } }
+```
+
 ## Requirements
 
 - Rust 1.88+
 - A terminal with true color (24-bit) support
-- A font with powerline glyphs (e.g. Nerd Font)
+- A [Nerd Font](https://www.nerdfonts.com/font-downloads) (e.g. MesloLGS NF, JetBrains Mono Nerd
+  Font), or Symbols Nerd Font Mono as a fallback font. Ghostty, WezTerm and Kitty 0.36+ ship these
+  glyphs built in. Plain "for Powerline" fonts are not enough: they lack the rounded end caps
+  (U+E0B4, U+E0B6).
+  - The worktree marker `⧉` (U+29C9) is missing from most Nerd Fonts and falls back to a math font
+    such as Noto Sans Math.
+  - The fast mode marker `⚡` looks best with an emoji font such as Noto Color Emoji.
 - Clickable PR and repo links need a terminal with OSC 8 support (Ghostty, iTerm2, Kitty, WezTerm)
+- The update check needs `curl`
 
 ## Build
 
@@ -179,6 +206,9 @@ milliseconds, so the cost is negligible.
 
 ## Input format
 
+Both schemas below were last checked against Claude Code **v2.1.289**. Newer releases add fields
+the renderer ignores, and a field whose type changes hides its section instead of breaking the line.
+
 Claude Code pipes a JSON object to stdin on every refresh. Every field below is optional except `workspace.current_dir` and `model.display_name`:
 
 ```json
@@ -209,7 +239,9 @@ Claude Code pipes a JSON object to stdin on every refresh. Every field below is 
   "rate_limits": {
     "five_hour": { "used_percentage": 23.5, "resets_at": 1738425600 },
     "seven_day": { "used_percentage": 41.2, "resets_at": 1738857600 },
-    "spend_limit": { "used_percentage": 62.8, "resets_at": 1740787200 }
+    "spend_limit": {
+      "used_percentage": 62.8, "resets_at": 1740787200, "used_usd": 271.4, "limit_usd": 500
+    }
   },
   "prompt_cache": {
     "warm": true,
@@ -217,7 +249,9 @@ Claude Code pipes a JSON object to stdin on every refresh. Every field below is 
     "ttl": "1h",
     "expires_at": 1738429200,
     "hit_ratio": 0.91,
-    "recache_tokens_if_cold": 45000
+    "recache_tokens_if_cold": 45000,
+    "last_miss_at": 1738420000,
+    "last_miss_cause": { "causes": ["tools_changed"] }
   },
   "agent": { "name": "security-reviewer" },
   "pr": { "number": 1234, "url": "https://github.com/o/r/pull/1234", "review_state": "approved" },
@@ -227,8 +261,8 @@ Claude Code pipes a JSON object to stdin on every refresh. Every field below is 
 
 Notes on availability:
 
-- `rate_limits` appears for Claude.ai Pro/Max subscribers after the first API response. `spend_limit` appears only behind a Claude apps gateway that sets one (v2.1.251+)
-- `prompt_cache` appears after the main conversation's first API response (v2.1.251+). `expires_at` is `null` while the cache is cold
+- `rate_limits` appears for Claude.ai Pro/Max subscribers after the first API response. `spend_limit` appears only behind a Claude apps gateway that sets one (v2.1.251+). Its `used_usd` and `limit_usd` need v2.1.284+ on both Claude Code and the gateway, and can lag `used_percentage` by about five minutes
+- `prompt_cache` appears after the main conversation's first API response (v2.1.251+). `expires_at` is `null` while the cache is cold. `last_miss_cause` needs v2.1.260+
 - `pr` appears only while an open PR or GitLab merge request exists for the branch. `kind` is `mr` for a merge request and absent for GitHub (v2.1.234+)
 - `effort` appears only on models supporting the reasoning effort parameter
 - `context_window.current_usage` is `null` before the first API call and after `/compact`
@@ -245,15 +279,16 @@ Notes on availability:
     {
       "id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
       "description": "Search the repo", "model": "claude-opus-5", "effort": "high",
-      "contextWindowSize": 200000, "tokenCount": 12500
+      "contextWindowSize": 200000, "tokenCount": 12500, "startTime": 1738425466000
     }
   ]
 }
 ```
 
-Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6%`, with the detail column
-truncated to fit `columns` and dropped entirely when there is no room for it. `model` and
-`contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
+Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6% · 2m14s`. The detail column
+is truncated to fit `columns` and dropped entirely when there is no room for it. The running time
+shows only while a task runs, since a finished task doesn't report when it ended, and only when it
+fits. `model` and `contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
 
 ## Testing
 

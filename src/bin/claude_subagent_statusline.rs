@@ -9,7 +9,8 @@ mod lenient;
 mod render;
 
 use render::{
-    BLUE, GREEN, RED, Rgb, SLATE, WHITE, YELLOW, fg_styled, fmt_tokens, truncate, usage_colors,
+    BLUE, GREEN, RED, Rgb, SLATE, WHITE, YELLOW, fg_styled, fmt_duration_secs, fmt_tokens,
+    truncate, unix_now, usage_colors,
 };
 use serde::Deserialize;
 use std::io::Read;
@@ -52,6 +53,9 @@ struct Task {
     context_window_size: Option<u64>,
     #[serde(default, deserialize_with = "lenient::option")]
     token_count: Option<u64>,
+    /// Unix milliseconds.
+    #[serde(default, deserialize_with = "lenient::option")]
+    start_time: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -70,12 +74,16 @@ impl Effort {
     }
 }
 
+fn is_running(status: Option<&str>) -> bool {
+    matches!(status, Some("running" | "in_progress" | "active"))
+}
+
 /// Marker glyph and color for a task status.
 fn status_marker(status: Option<&str>) -> (&'static str, Rgb) {
     match status {
-        Some("running" | "in_progress" | "active") => ("\u{25cf}", GREEN),
+        _ if is_running(status) => ("\u{25cf}", GREEN),
         Some("completed" | "done" | "success") => ("\u{2713}", BLUE),
-        Some("failed" | "error" | "cancelled") => ("\u{2717}", RED),
+        Some("failed" | "error" | "cancelled" | "killed") => ("\u{2717}", RED),
         Some("pending" | "queued" | "waiting") => ("\u{25cb}", YELLOW),
         _ => ("\u{25cf}", SLATE),
     }
@@ -92,7 +100,16 @@ fn short_model(model: &str) -> String {
     }
 }
 
-fn render_row(task: &Task, columns: Option<usize>) -> String {
+/// Cells taken by the marker, a space, and `parts` joined by separators.
+///
+/// Terminal cells, not chars: a wide name or model would otherwise overflow the row.
+fn row_width(marker: &str, parts: &[(String, Rgb)]) -> usize {
+    let text: usize = parts.iter().map(|(text, _)| text.width()).sum();
+    marker.width() + 1 + text + SEPARATOR.width() * parts.len().saturating_sub(1)
+}
+
+/// `now` is Unix epoch seconds, passed in so the elapsed time is deterministic under test.
+fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
     let (marker, marker_color) = status_marker(task.status.as_deref());
 
     // Fixed columns, in display order
@@ -126,6 +143,18 @@ fn render_row(task: &Task, columns: Option<usize>) -> String {
         parts.push((text, color));
     }
 
+    // Running time, only when it fits; a finished task doesn't report when it ended
+    if is_running(task.status.as_deref())
+        && let Some(started) = task.start_time.map(|ms| ms / 1_000)
+        && started <= now
+    {
+        let elapsed = fmt_duration_secs(now - started);
+        let width = row_width(marker, &parts) + SEPARATOR.width() + elapsed.width();
+        if columns.is_none_or(|columns| width <= columns) {
+            parts.push((elapsed, DIM));
+        }
+    }
+
     // The detail column absorbs whatever width is left over
     let detail = task
         .label
@@ -134,13 +163,9 @@ fn render_row(task: &Task, columns: Option<usize>) -> String {
         .filter(|d| !d.is_empty());
 
     if let Some(detail) = detail {
-        // Terminal cells, not chars: a wide name or model would otherwise overflow the row
-        let fixed: usize = parts.iter().map(|(text, _)| text.width()).sum();
-        // marker + space, plus a separator before every part after the name
-        let overhead = marker.width() + 1 + SEPARATOR.width() * parts.len();
         let budget = columns
             .unwrap_or(usize::MAX)
-            .saturating_sub(fixed + overhead);
+            .saturating_sub(row_width(marker, &parts) + SEPARATOR.width());
 
         if budget >= MIN_DETAIL_WIDTH {
             // Detail sits right after the name
@@ -165,8 +190,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     std::io::stdin().read_to_string(&mut input_str)?;
     let input: Input = serde_json::from_str(&input_str)?;
 
+    let now = unix_now();
     for task in &input.tasks {
-        let content = render_row(task, input.columns);
+        let content = render_row(task, input.columns, now);
         println!(
             "{}",
             serde_json::json!({ "id": task.id, "content": content })
@@ -199,6 +225,8 @@ mod tests {
     use render::strip_ansi;
     use serde_json::json;
 
+    const NOW: u64 = 1_750_000_000;
+
     fn parse(payload: &serde_json::Value) -> Input {
         serde_json::from_value(payload.clone()).expect("payload parses")
     }
@@ -208,6 +236,7 @@ mod tests {
             "id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
             "model": "claude-opus-5", "effort": "high",
             "contextWindowSize": 200_000, "tokenCount": 12_500,
+            "startTime": (NOW - 134) * 1_000 + 999,
         })
     }
 
@@ -221,11 +250,31 @@ mod tests {
     #[test]
     fn row_shows_detail_model_and_context_share() {
         let input = parse(&json!({ "columns": 80, "tasks": [explore()] }));
-        let row = strip_ansi(&render_row(&input.tasks[0], input.columns));
+        let row = strip_ansi(&render_row(&input.tasks[0], input.columns, NOW));
         assert_eq!(
             row,
-            "\u{25cf} Explore \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6%"
+            "\u{25cf} Explore \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6% \u{b7} 2m14s"
         );
+    }
+
+    #[test]
+    fn running_time_shows_only_while_the_task_runs() {
+        let row = |status: &str| {
+            let mut task = explore();
+            task["status"] = json!(status);
+            let input = parse(&json!({ "tasks": [task] }));
+            strip_ansi(&render_row(&input.tasks[0], None, NOW))
+        };
+        assert!(row("running").ends_with(" 2m14s"), "{}", row("running"));
+        assert!(!row("completed").contains("2m14s"), "{}", row("completed"));
+        assert!(row("killed").starts_with('\u{2717}'), "{}", row("killed"));
+
+        // A start time ahead of the local clock is skew, not a duration
+        let mut task = explore();
+        task["startTime"] = json!((NOW + 5) * 1_000);
+        let input = parse(&json!({ "tasks": [task] }));
+        let row = strip_ansi(&render_row(&input.tasks[0], None, NOW));
+        assert!(row.ends_with(" 6%"), "{row}");
     }
 
     #[test]
@@ -234,11 +283,11 @@ mod tests {
         task["label"] = json!("a long description of what the agent is doing");
         let input = parse(&json!({ "tasks": [task] }));
 
-        let row = strip_ansi(&render_row(&input.tasks[0], Some(60)));
+        let row = strip_ansi(&render_row(&input.tasks[0], Some(60), NOW));
         assert!(row.contains('\u{2026}'), "{row}");
         assert!(row.width() <= 60, "{row}");
 
-        let row = strip_ansi(&render_row(&input.tasks[0], Some(30)));
+        let row = strip_ansi(&render_row(&input.tasks[0], Some(30), NOW));
         assert!(!row.contains("long"), "{row}");
     }
 
@@ -250,7 +299,7 @@ mod tests {
         let input = parse(&json!({ "tasks": [task] }));
 
         for columns in [40, 50, 60, 80] {
-            let row = strip_ansi(&render_row(&input.tasks[0], Some(columns)));
+            let row = strip_ansi(&render_row(&input.tasks[0], Some(columns), NOW));
             assert!(
                 row.width() <= columns,
                 "{columns}: {row} is {} cells",
@@ -264,7 +313,7 @@ mod tests {
         let mut task = explore();
         task["effort"] = json!(16_000);
         let input = parse(&json!({ "tasks": [task] }));
-        let row = strip_ansi(&render_row(&input.tasks[0], None));
+        let row = strip_ansi(&render_row(&input.tasks[0], None, NOW));
         assert!(row.contains("opus-5 16k"), "{row}");
     }
 
