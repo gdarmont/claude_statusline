@@ -190,6 +190,10 @@ commits, so write subjects that read as changelog entries. Once the release is o
 runs `install.sh` on x86_64 and arm64 Linux and on Apple Silicon macOS, the way users do, and checks
 that the installed version matches the tag.
 
+In this repository, a `Release tags` ruleset blocks deleting or moving a `v*` tag once it's pushed,
+so fix a bad release with a new patch version. To move a tag anyway, disable the ruleset in the
+repository's Settings → Rules first.
+
 To rehearse a release without publishing, for example after changing the workflow, run it by hand.
 It tests, builds and packages every platform, then stops before creating the release:
 
