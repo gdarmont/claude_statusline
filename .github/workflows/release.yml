@@ -1,7 +1,8 @@
 name: Release
 
 # Tagging v* publishes a GitHub release with one zip per platform, each holding
-# both binaries, plus a SHA256SUMS file that install.sh verifies against.
+# both binaries, plus a SHA256SUMS file that install.sh verifies against. The
+# zips and binaries carry signed build provenance, for `gh attestation verify`.
 #
 # Running it by hand (workflow_dispatch) is a dry run: it tests, builds and
 # packages every platform, then stops short of publishing.
@@ -21,6 +22,12 @@ jobs:
     name: ${{ matrix.label }}
     needs: ci
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      # Sign and record the build provenance
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -81,6 +88,16 @@ jobs:
             "target/${{ matrix.target }}/release/claude_statusline" \
             "target/${{ matrix.target }}/release/claude_subagent_statusline"
           echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      # The binaries too, so an installed copy verifies, not just the download
+      - name: Attest build provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ${{ env.ASSET }}
+            target/${{ matrix.target }}/release/claude_statusline
+            target/${{ matrix.target }}/release/claude_subagent_statusline
 
       - uses: actions/upload-artifact@v7
         with:
