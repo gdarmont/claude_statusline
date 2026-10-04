@@ -160,7 +160,7 @@ fn a_cached_newer_release_is_announced_on_the_first_row() {
         out.stdout
     );
     assert!(
-        out.stdout.contains("/releases/tag/v99.0.0"),
+        out.stdout.contains("claude_statusline#install-or-update"),
         "{}",
         out.stdout
     );

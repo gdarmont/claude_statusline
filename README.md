@@ -24,7 +24,7 @@ Each table entry is one section of the example above, listed left to right.
 | Worktree | `⧉ my-feature ← master` | Teal | Worktree name (`--worktree` session or linked git worktree), then `←` and the branch it was created from |
 | Pull request | `PR #1234 approved` | State-colored | Open PR for the current branch and its review state, clickable. `MR !1234` for a GitLab merge request. Green approved / red changes requested / yellow pending / slate draft |
 | Session name | `session-name` | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
-| Update | `↑ v1.0.2` | Orange | **Right-aligned.** Only when a newer release is out, linked to its release page. See [Update check](#update-check) |
+| Update | `↑ v1.0.2` | Orange | **Right-aligned.** Only when a newer release is out, linked to [Install or update](#install-or-update). See [Update check](#update-check) |
 
 ### Row 2 — session state
 
@@ -71,8 +71,8 @@ To move a section between sides, move its `Section::new(...)` push between the `
 ### Update check
 
 Once a day, the status line checks GitHub for a newer release and, when there is one, shows
-`↑ v1.0.2` at the right of the first row, linked to its release page. Re-run the
-[install command](#install) to update; nothing is installed automatically.
+`↑ v1.0.2` at the right of the first row, linked to [Install or update](#install-or-update).
+Nothing is installed automatically.
 
 The check never slows the status line down. Each render only reads the tag cached in
 `~/.claude/claude_statusline.update` (`$CLAUDE_CONFIG_DIR` when set). When that file is a day old,
@@ -112,7 +112,7 @@ Two binaries are produced in `target/release/`:
 - `claude_statusline` -- the main status line
 - `claude_subagent_statusline` -- one row per subagent in the agent panel
 
-## Install
+## Install or update
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh | bash
@@ -123,6 +123,9 @@ published `SHA256SUMS`, backs up any existing `claude_statusline` to `claude_sta
 first run, and installs both binaries into `~/.claude/`. Prebuilt binaries cover x86_64 and
 aarch64 Linux (static musl; aarch64 from v1.2.0) and both Apple Silicon and Intel
 macOS; anything else needs a source build.
+
+To update, run the same command again. What changed in each version is on the
+[releases page](https://github.com/gdarmont/claude_statusline/releases).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|

@@ -132,11 +132,11 @@ pub fn parse_version(text: &str) -> Option<(u64, u64, u64)> {
     parts.next().is_none().then_some(version)
 }
 
-/// `↑ v1.2.3`, linked to its release page, when `latest` is newer than `current`.
+/// `↑ v1.2.3`, linked to the README's update steps, when `latest` is newer than `current`.
 pub fn notice(latest: &str, current: &str) -> Option<Section> {
     if parse_version(latest)? <= parse_version(current)? {
         return None;
     }
-    let url = format!("{}/releases/tag/{latest}", env!("CARGO_PKG_REPOSITORY"));
+    let url = format!("{}#install-or-update", env!("CARGO_PKG_REPOSITORY"));
     Some(Section::new(format!("\u{2191} {latest}"), ORANGE, WHITE).link(Some(url)))
 }

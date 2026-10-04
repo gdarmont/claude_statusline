@@ -760,7 +760,7 @@ mod tests {
         assert_eq!(notice.text, "\u{2191} v1.2.0");
         assert_eq!(
             notice.url.as_deref(),
-            Some("https://github.com/gdarmont/claude_statusline/releases/tag/v1.2.0")
+            Some("https://github.com/gdarmont/claude_statusline#install-or-update")
         );
         // Compared as numbers, not strings
         assert!(update::notice("v1.10.0", "1.9.0").is_some());
