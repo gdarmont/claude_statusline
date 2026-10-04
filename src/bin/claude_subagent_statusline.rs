@@ -20,6 +20,11 @@ const DIM: Rgb = Rgb(120, 124, 138);
 const SEPARATOR: &str = " \u{b7} ";
 /// Below this the detail column is dropped rather than truncated to noise.
 const MIN_DETAIL_WIDTH: usize = 8;
+const SPARK_BARS: [char; 8] = [
+    '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}',
+];
+/// Intervals the sparkline covers, about five seconds each.
+const SPARK_WIDTH: usize = 8;
 
 #[derive(Deserialize)]
 struct Input {
@@ -56,6 +61,9 @@ struct Task {
     /// Unix milliseconds.
     #[serde(default, deserialize_with = "lenient::option")]
     start_time: Option<u64>,
+    /// `tokenCount` on recent refresh ticks, oldest first: Claude Code keeps the last 16.
+    #[serde(default, deserialize_with = "lenient::vec")]
+    token_samples: Vec<u64>,
 }
 
 #[derive(Deserialize)]
@@ -108,6 +116,42 @@ fn row_width(marker: &str, parts: &[(String, Rgb)]) -> usize {
     marker.width() + 1 + text + SEPARATOR.width() * parts.len().saturating_sub(1)
 }
 
+/// Tokens gained per sampling interval, as bars scaled to the busiest interval shown.
+///
+/// The counts only grow, so plotting them directly would always draw a ramp. Growth
+/// tells a busy agent from a stalled one, which draws a flat `▁▁▁`.
+fn sparkline(samples: &[u64]) -> Option<String> {
+    let recent = &samples[samples.len().saturating_sub(SPARK_WIDTH + 1)..];
+    let gains: Vec<u64> = recent
+        .windows(2)
+        .map(|pair| pair[1].saturating_sub(pair[0]))
+        .collect();
+    let peak = gains.iter().copied().max()?;
+    let bars = gains.iter().map(|&gain| {
+        if gain == 0 {
+            SPARK_BARS[0]
+        } else {
+            // 1..=7: any growth at all clears the stalled bar
+            SPARK_BARS[gain.saturating_mul(7).div_ceil(peak) as usize]
+        }
+    });
+    Some(bars.collect())
+}
+
+/// Insert `text` at `index` when the row still fits in `columns`.
+fn insert_if_fits(
+    parts: &mut Vec<(String, Rgb)>,
+    index: usize,
+    text: String,
+    marker: &str,
+    columns: Option<usize>,
+) {
+    let width = row_width(marker, parts) + SEPARATOR.width() + text.width();
+    if columns.is_none_or(|columns| width <= columns) {
+        parts.insert(index, (text, DIM));
+    }
+}
+
 /// `now` is Unix epoch seconds, passed in so the elapsed time is deterministic under test.
 fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
     let (marker, marker_color) = status_marker(task.status.as_deref());
@@ -143,25 +187,33 @@ fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
         parts.push((text, color));
     }
 
-    // Running time, only when it fits; a finished task doesn't report when it ended
-    if is_running(task.status.as_deref())
-        && let Some(started) = task.start_time.map(|ms| ms / 1_000)
-        && started <= now
-    {
-        let elapsed = fmt_duration_secs(now - started);
-        let width = row_width(marker, &parts) + SEPARATOR.width() + elapsed.width();
-        if columns.is_none_or(|columns| width <= columns) {
-            parts.push((elapsed, DIM));
-        }
-    }
-
-    // The detail column absorbs whatever width is left over
     let detail = task
         .label
         .clone()
         .or_else(|| task.description.clone())
         .filter(|d| !d.is_empty());
 
+    // Running time, then recent activity before it, each only when it fits next to the
+    // detail's minimum: what the agent is doing matters more. A finished task reports
+    // when it started but not when it ended, and its samples stop growing.
+    if is_running(task.status.as_deref()) {
+        let reserve = detail
+            .as_ref()
+            .map_or(0, |_| SEPARATOR.width() + MIN_DETAIL_WIDTH);
+        let room = columns.map(|columns| columns.saturating_sub(reserve));
+        let tail = parts.len();
+        if let Some(started) = task.start_time.map(|ms| ms / 1_000)
+            && started <= now
+        {
+            let elapsed = fmt_duration_secs(now - started);
+            insert_if_fits(&mut parts, tail, elapsed, marker, room);
+        }
+        if let Some(activity) = sparkline(&task.token_samples) {
+            insert_if_fits(&mut parts, tail, activity, marker, room);
+        }
+    }
+
+    // The detail column absorbs whatever width is left over
     if let Some(detail) = detail {
         let budget = columns
             .unwrap_or(usize::MAX)
@@ -237,6 +289,7 @@ mod tests {
             "model": "claude-opus-5", "effort": "high",
             "contextWindowSize": 200_000, "tokenCount": 12_500,
             "startTime": (NOW - 134) * 1_000 + 999,
+            "tokenSamples": [0, 0, 500, 1_500, 1_500, 1_600],
         })
     }
 
@@ -253,7 +306,7 @@ mod tests {
         let row = strip_ansi(&render_row(&input.tasks[0], input.columns, NOW));
         assert_eq!(
             row,
-            "\u{25cf} Explore \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6% \u{b7} 2m14s"
+            "\u{25cf} Explore \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6% \u{b7} \u{2581}\u{2585}\u{2588}\u{2581}\u{2582} \u{b7} 2m14s"
         );
     }
 
@@ -266,12 +319,13 @@ mod tests {
             strip_ansi(&render_row(&input.tasks[0], None, NOW))
         };
         assert!(row("running").ends_with(" 2m14s"), "{}", row("running"));
-        assert!(!row("completed").contains("2m14s"), "{}", row("completed"));
+        assert!(row("completed").ends_with(" 6%"), "{}", row("completed"));
         assert!(row("killed").starts_with('\u{2717}'), "{}", row("killed"));
 
         // A start time ahead of the local clock is skew, not a duration
         let mut task = explore();
         task["startTime"] = json!((NOW + 5) * 1_000);
+        task["tokenSamples"] = json!([]);
         let input = parse(&json!({ "tasks": [task] }));
         let row = strip_ansi(&render_row(&input.tasks[0], None, NOW));
         assert!(row.ends_with(" 6%"), "{row}");
@@ -306,6 +360,33 @@ mod tests {
                 row.width()
             );
         }
+    }
+
+    #[test]
+    fn sparkline_plots_recent_growth_scaled_to_the_busiest_interval() {
+        // Gains 0, 500, 1000, 0, 100: any growth clears the bottom bar
+        assert_eq!(
+            sparkline(&[0, 0, 500, 1_500, 1_500, 1_600]).as_deref(),
+            Some("\u{2581}\u{2585}\u{2588}\u{2581}\u{2582}")
+        );
+        // Stalled
+        assert_eq!(
+            sparkline(&[900, 900, 900]).as_deref(),
+            Some("\u{2581}\u{2581}")
+        );
+        // A count that drops, after a compaction, reads as no growth
+        assert_eq!(
+            sparkline(&[900, 100, 600]).as_deref(),
+            Some("\u{2581}\u{2588}")
+        );
+        // Only the most recent intervals
+        let samples: Vec<u64> = (0..16).map(|i| i * 100).collect();
+        assert_eq!(
+            sparkline(&samples).map(|s| s.chars().count()),
+            Some(SPARK_WIDTH)
+        );
+        assert_eq!(sparkline(&[42]), None);
+        assert_eq!(sparkline(&[]), None);
     }
 
     #[test]

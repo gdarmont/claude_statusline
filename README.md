@@ -287,16 +287,25 @@ Notes on availability:
     {
       "id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
       "description": "Search the repo", "model": "claude-opus-5", "effort": "high",
-      "contextWindowSize": 200000, "tokenCount": 12500, "startTime": 1738425466000
+      "contextWindowSize": 200000, "tokenCount": 12500, "startTime": 1738425466000,
+      "tokenSamples": [0, 0, 500, 1500, 1500, 1600]
     }
   ]
 }
 ```
 
-Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6% · 2m14s`. The detail column
-is truncated to fit `columns` and dropped entirely when there is no room for it. The running time
-shows only while a task runs, since a finished task doesn't report when it ended, and only when it
-fits. `model` and `contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
+Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6% · ▁▅█▁▂ · 2m14s`. The detail
+column is truncated to fit `columns` and dropped entirely when there is no room for it.
+
+While a task runs, two more columns follow when they fit next to a minimal detail column:
+
+- A sparkline of the tokens gained between recent `tokenSamples` (Claude Code samples about every
+  five seconds), up to the last eight intervals, scaled to the busiest one. A flat `▁▁▁` is an
+  agent that has stopped producing tokens.
+- How long the task has been running. A finished task doesn't report when it ended, so it gets
+  neither column.
+
+`model` and `contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
 
 ## Testing
 
