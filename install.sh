@@ -44,7 +44,7 @@ asset="claude_statusline-$version-$arch-$os.zip"
 base="https://github.com/$REPO/releases/download/$version"
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp" "$DEST/.claude_statusline.new" "$DEST/.claude_subagent_statusline.new"' EXIT
 
 printf 'Downloading %s (%s)...\n' "$asset" "$version"
 curl -fsSL -o "$tmp/$asset" "$base/$asset" \
@@ -73,10 +73,30 @@ if [ -f "$DEST/claude_statusline" ] && [ ! -f "$DEST/claude_statusline.bak" ]; t
   printf 'Backed up previous binary -> %s/claude_statusline.bak\n' "$DEST"
 fi
 
-install -m 755 "$tmp/unpacked/claude_statusline" "$DEST/claude_statusline"
-install -m 755 "$tmp/unpacked/claude_subagent_statusline" "$DEST/claude_subagent_statusline"
+# Write next to the target, then rename over it: a status line render that
+# starts mid-update runs the old binary or the new one, never a partial file.
+for bin in claude_statusline claude_subagent_statusline; do
+  install -m 755 "$tmp/unpacked/$bin" "$DEST/.$bin.new"
+  mv -f "$DEST/.$bin.new" "$DEST/$bin"
+done
 
 printf '\nInstalled %s -> %s\n' "$version" "$DEST"
+
+# On an update, settings.json already points here, in full or as ~/...
+settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+case "$DEST" in
+  "$HOME"/*) short="~${DEST#"$HOME"}" ;;
+  *)         short="$DEST" ;;
+esac
+configured() {
+  grep -qF -e "$DEST/$1\"" -e "$short/$1\"" "$settings" 2>/dev/null
+}
+
+if configured claude_statusline && configured claude_subagent_statusline; then
+  printf 'Claude Code is already set up for it: the next status line refresh runs %s.\n' "$version"
+  exit 0
+fi
+
 cat <<EOF
 
 Add this to ~/.claude/settings.json, then restart Claude Code:

@@ -124,7 +124,8 @@ first run, and installs both binaries into `~/.claude/`. Prebuilt binaries cover
 aarch64 Linux (static musl; aarch64 from v1.2.0) and both Apple Silicon and Intel
 macOS; anything else needs a source build.
 
-To update, run the same command again. What changed in each version is on the
+To update, run the same command again. Claude Code switches to the new version on its next status
+line refresh, without a restart. What changed in each version is on the
 [releases page](https://github.com/gdarmont/claude_statusline/releases).
 
 | Variable | Default | Purpose |

@@ -14,8 +14,12 @@ if [ -f "$DEST/claude_statusline" ] && [ ! -f "$DEST/claude_statusline.bak" ]; t
   echo "backed up previous binary -> $DEST/claude_statusline.bak"
 fi
 
-install -m 755 target/release/claude_statusline "$DEST/claude_statusline"
-install -m 755 target/release/claude_subagent_statusline "$DEST/claude_subagent_statusline"
+# Write next to the target, then rename over it: a status line render that
+# starts mid-update runs the old binary or the new one, never a partial file.
+for bin in claude_statusline claude_subagent_statusline; do
+  install -m 755 "target/release/$bin" "$DEST/.$bin.new"
+  mv -f "$DEST/.$bin.new" "$DEST/$bin"
+done
 echo "installed -> $DEST"
 
 echo
