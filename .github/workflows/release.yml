@@ -28,6 +28,11 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             label: x86_64-linux
+          # GitHub's arm64 runner, free for public repositories: a native
+          # build, so no cross toolchain
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            label: aarch64-linux
           - os: macos-latest
             target: aarch64-apple-darwin
             label: aarch64-macos
@@ -50,8 +55,17 @@ jobs:
             exit 1
           fi
 
+      # The arm64 image hasn't always shipped Rust
+      - name: Install rustup when missing
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --profile minimal --no-modify-path
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
       - name: Install musl tools
-        if: matrix.target == 'x86_64-unknown-linux-musl'
+        if: endsWith(matrix.target, '-linux-musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Add target

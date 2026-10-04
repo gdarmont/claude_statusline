@@ -31,10 +31,6 @@ case "$(uname -m)" in
   *)               die "unsupported architecture: $(uname -m)" ;;
 esac
 
-if [ "$os" = linux ] && [ "$arch" = aarch64 ]; then
-  die "no prebuilt binary for aarch64 Linux. Build from source: https://github.com/$REPO"
-fi
-
 version="${VERSION:-}"
 if [ -z "$version" ]; then
   # Follow the /releases/latest redirect rather than hitting the API, which
