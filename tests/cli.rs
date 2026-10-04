@@ -239,7 +239,7 @@ fn version_flag_prints_the_crate_version_without_reading_stdin() {
 #[test]
 fn subagent_emits_nothing_on_bad_input_so_defaults_stay() {
     let out = run(SUBAGENT, "not json", &[]);
-    assert!(out.stdout.is_empty());
+    assert_eq!(out.stdout, "");
     assert!(
         out.stderr.starts_with("claude_subagent_statusline: "),
         "{}",
