@@ -3,6 +3,7 @@ name: Release
 # Tagging v* publishes a GitHub release with one zip per platform, each holding
 # both binaries, plus a SHA256SUMS file that install.sh verifies against. The
 # zips and binaries carry signed build provenance, for `gh attestation verify`.
+# Once published, the release is installed through install.sh and checked.
 #
 # Running it by hand (workflow_dispatch) is a dry run: it tests, builds and
 # packages every platform, then stops short of publishing.
@@ -151,3 +152,45 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --notes-file notes.md
+
+  # Install the published release the way users do, through install.sh and
+  # the /releases/latest redirect, and check what lands. x86_64 macOS has no
+  # runner left; its zip is the same code, cross-compiled.
+  install:
+    name: install (${{ matrix.os }})
+    needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Wait for the latest release to be this one
+        run: |
+          for _ in 1 2 3 4 5 6; do
+            latest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+              "https://github.com/$GITHUB_REPOSITORY/releases/latest")
+            [ "${latest##*/}" = "$GITHUB_REF_NAME" ] && exit 0
+            sleep 10
+          done
+          echo "releases/latest still points at ${latest##*/}" >&2
+          exit 1
+
+      - name: Install
+        run: CLAUDE_DIR="$RUNNER_TEMP" CLAUDE_CONFIG_DIR="$RUNNER_TEMP" bash install.sh
+
+      - name: Check the installed binaries
+        env:
+          CLAUDE_STATUSLINE_UPDATE_CHECK: "0"
+        run: |
+          version=$("$RUNNER_TEMP/claude_statusline" --version)
+          [ "$version" = "claude_statusline ${GITHUB_REF_NAME#v}" ] || {
+            echo "installed $version, expected $GITHUB_REF_NAME" >&2
+            exit 1
+          }
+          echo '{"workspace":{"current_dir":"/tmp"},"model":{"display_name":"Opus"}}' \
+            | "$RUNNER_TEMP/claude_statusline" | grep -q Opus
+          echo '{"tasks":[]}' | "$RUNNER_TEMP/claude_subagent_statusline"
