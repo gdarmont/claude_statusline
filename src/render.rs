@@ -93,7 +93,7 @@ pub fn format_sections(sections: &[Section]) -> String {
     };
 
     // Leading round cap
-    let _ = write!(out, "{}", ansi_styled(LEFT_ROUND, BLACK, first.bg));
+    let _ = write!(out, "{}", cap(LEFT_ROUND, first.bg));
 
     for (i, section) in sections.iter().enumerate() {
         if i > 0 {
@@ -117,10 +117,16 @@ pub fn format_sections(sections: &[Section]) -> String {
 
     // Trailing round cap
     if let Some(last) = sections.last() {
-        let _ = write!(out, "{}", ansi_styled(RIGHT_ROUND, BLACK, last.bg));
+        let _ = write!(out, "{}", cap(RIGHT_ROUND, last.bg));
     }
 
     out
+}
+
+/// A round cap in the section's color, on the terminal's own background so it
+/// blends into any theme, the way the gap between the two groups does.
+fn cap(glyph: &str, color: Rgb) -> String {
+    format!("{RESET}{}", fg_styled(glyph, color))
 }
 
 /// Cells a section group occupies once rendered: two round caps, one separator

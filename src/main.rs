@@ -558,7 +558,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use render::{BLACK, format_row_within, group_width, strip_ansi, truncate};
+    use render::{BLACK, format_row_within, format_sections, group_width, strip_ansi, truncate};
     use serde_json::{Value, json};
     use unicode_width::UnicodeWidthStr as _;
 
@@ -842,6 +842,21 @@ mod tests {
     fn required_fields_stay_strict() {
         let missing_model = json!({ "workspace": { "current_dir": "/tmp" } });
         assert!(serde_json::from_value::<Input>(missing_model).is_err());
+    }
+
+    #[test]
+    fn round_caps_keep_the_terminal_background() {
+        let row = format_sections(&[Section::new("Opus", BLUE, WHITE)]);
+        assert!(
+            row.starts_with("\x1b[0m\x1b[38;2;52;86;164m\u{e0b6}\x1b[0m"),
+            "{row:?}"
+        );
+        assert!(
+            row.ends_with("\x1b[0m\x1b[38;2;52;86;164m\u{e0b4}\x1b[0m"),
+            "{row:?}"
+        );
+        // Any background other than the sections' own would paint a box behind the caps
+        assert_eq!(row.matches("\x1b[48;").count(), 1, "{row:?}");
     }
 
     #[test]
