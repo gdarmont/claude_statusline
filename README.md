@@ -154,12 +154,17 @@ To check what's installed:
 ~/.claude/claude_statusline --version
 ```
 
-Release zips and the binaries in them carry a signed build provenance attestation (releases after
-v1.1.0). To confirm a binary was built by this repository's release workflow:
+Release zips and the binaries in them carry a signed build provenance attestation (v1.2.0 and
+later). To confirm a binary was built by this repository's release workflow, with the
+[GitHub CLI](https://cli.github.com/) logged in:
 
 ```sh
-gh attestation verify ~/.claude/claude_statusline --repo gdarmont/claude_statusline
+gh attestation verify ~/.claude/claude_statusline --repo gdarmont/claude_statusline \
+  --signer-workflow gdarmont/claude_statusline/.github/workflows/release.yml
 ```
+
+`--signer-workflow` accepts only signatures made by `release.yml`, not by other workflows in the
+repository.
 
 ## Releasing
 
