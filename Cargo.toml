@@ -5,6 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Powerline-style statusline renderer for Claude Code"
 repository = "https://github.com/gdarmont/claude_statusline"
+license = "Apache-2.0"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

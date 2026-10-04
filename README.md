@@ -330,3 +330,7 @@ echo '{"workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Opus"}}'
 echo '{"columns":80,"tasks":[{"id":"t1","name":"Explore","status":"running","tokenCount":12500,"contextWindowSize":200000}]}' \
   | ./target/release/claude_subagent_statusline
 ```
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).

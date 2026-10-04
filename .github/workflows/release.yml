@@ -84,7 +84,7 @@ jobs:
       - name: Package
         run: |
           asset="claude_statusline-${GITHUB_REF_NAME}-${{ matrix.label }}.zip"
-          zip -j "$asset" \
+          zip -j "$asset" LICENSE \
             "target/${{ matrix.target }}/release/claude_statusline" \
             "target/${{ matrix.target }}/release/claude_subagent_statusline"
           echo "ASSET=$asset" >> "$GITHUB_ENV"
