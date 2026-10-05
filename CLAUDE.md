@@ -8,6 +8,7 @@ Powerline-style status line renderer for Claude Code, in Rust. It reads session 
 - `src/bin/claude_subagent_statusline.rs`: the `claude_subagent_statusline` binary. It prints one `{"id","content"}` JSON line per subagent task.
 - `src/render.rs`: shared colors, `Section`, powerline formatting, width and truncation helpers, and number/duration formatting.
 - `src/update.rs`: the once-a-day release check, used only by `claude_statusline`. The render reads a cached tag; a detached `claude_statusline --check-update <path>` refreshes it with `curl`.
+- `src/notify.rs`: the opt-in desktop notification before the prompt cache expires, used only by `claude_statusline`. A marker file per expiry and session keeps it to one notification; `notify-send` or `osascript` runs detached.
 - `src/lenient.rs`: deserializers that turn a field with an unexpected type into `None` (or drop a bad array element) instead of failing the parse.
 - There is no lib crate. Both binaries pull the shared files in with `mod`, and the subagent binary uses `#[path = "../…"]`.
 - Unit tests sit in a `#[cfg(test)] mod tests` at the bottom of each binary. `render.rs` helpers are tested from `main.rs`, so they don't run twice. `tests/cli.rs` runs the built binaries end to end.

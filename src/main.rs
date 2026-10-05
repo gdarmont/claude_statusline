@@ -1,4 +1,5 @@
 mod lenient;
+mod notify;
 mod render;
 mod update;
 
@@ -14,6 +15,8 @@ use std::process::Command;
 
 #[derive(Deserialize)]
 struct Input {
+    #[serde(default, deserialize_with = "lenient::option")]
+    session_id: Option<String>,
     #[serde(default, deserialize_with = "lenient::option")]
     session_name: Option<String>,
     workspace: Workspace,
@@ -222,22 +225,26 @@ fn get_git_branch(dir: &str) -> Option<String> {
     })
 }
 
+/// Last component of the workspace directory.
+fn dir_name(input: &Input) -> &str {
+    Path::new(&input.workspace.current_dir)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&input.workspace.current_dir)
+}
+
 /// First row: where the work is happening. Session name sits on the right.
 fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
     let mut sections = Vec::new();
 
     // Directory name, linked to the remote repository when one is known
-    let dir_name = Path::new(&input.workspace.current_dir)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(&input.workspace.current_dir);
     let repo_url = input.workspace.repo.as_ref().and_then(|repo| {
         match (&repo.host, &repo.owner, &repo.name) {
             (Some(host), Some(owner), Some(name)) => Some(format!("https://{host}/{owner}/{name}")),
             _ => None,
         }
     });
-    sections.push(Section::new(dir_name, BLUE, WHITE).link(repo_url));
+    sections.push(Section::new(dir_name(input), BLUE, WHITE).link(repo_url));
 
     // Git branch: from the worktree payload when available, else ask git
     let branch = input
@@ -452,19 +459,29 @@ fn last_request_miss_cause(cache: &PromptCache, ttl_secs: u64) -> Option<&str> {
         .map(String::as_str)
 }
 
+/// Seconds until a warm cache expires. The payload can be stale by the time it renders,
+/// so expiry is checked locally too.
+fn cache_remaining(cache: &PromptCache, now: u64) -> Option<u64> {
+    cache
+        .expires_at
+        .filter(|&expires_at| cache.warm == Some(true) && expires_at > now)
+        .map(|expires_at| expires_at - now)
+}
+
+fn cache_ttl_secs(cache: &PromptCache) -> u64 {
+    match cache.ttl.as_deref() {
+        Some("1h") => 3_600,
+        _ => 300,
+    }
+}
+
 /// Warm: hit ratio and time until the cached prefix expires. Cold: what the next request re-caches.
 fn prompt_cache_section(cache: &PromptCache, now: u64) -> Option<Section> {
     if cache.caching_observed != Some(true) {
         return None;
     }
 
-    // The payload can be stale by the time it renders, so check expiry locally too
-    let remaining = cache
-        .expires_at
-        .filter(|&expires_at| cache.warm == Some(true) && expires_at > now)
-        .map(|expires_at| expires_at - now);
-
-    let Some(remaining) = remaining else {
+    let Some(remaining) = cache_remaining(cache, now) else {
         let mut text = "cache cold".to_string();
         if let Some(tokens) = cache.recache_tokens_if_cold
             && tokens > 0
@@ -474,10 +491,7 @@ fn prompt_cache_section(cache: &PromptCache, now: u64) -> Option<Section> {
         return Some(Section::new(text, SLATE, WHITE));
     };
 
-    let ttl_secs = match cache.ttl.as_deref() {
-        Some("1h") => 3_600,
-        _ => 300,
-    };
+    let ttl_secs = cache_ttl_secs(cache);
 
     let mut text = "cache".to_string();
     if let Some(ratio) = cache.hit_ratio {
@@ -495,6 +509,49 @@ fn prompt_cache_section(cache: &PromptCache, now: u64) -> Option<Section> {
         (CYAN, WHITE)
     };
     Some(Section::new(text, bg, fg))
+}
+
+/// Title and body of the desktop notification, while a warm cache is within `lead` seconds
+/// of expiring. Never when `lead` spans the whole TTL, which would fire after every request.
+fn cache_expiry_alert(input: &Input, now: u64, lead: u64) -> Option<(String, String)> {
+    let cache = input.prompt_cache.as_ref()?;
+    let remaining = cache_remaining(cache, now)?;
+    if cache.caching_observed != Some(true) || remaining > lead || lead >= cache_ttl_secs(cache) {
+        return None;
+    }
+
+    let title = format!("Prompt cache expires in {}", fmt_cache_countdown(remaining));
+    let mut body = input
+        .session_name
+        .clone()
+        .unwrap_or_else(|| dir_name(input).to_string());
+    if let Some(tokens) = cache.recache_tokens_if_cold
+        && tokens > 0
+    {
+        let _ = write!(body, " \u{b7} {} tokens to re-cache", fmt_tokens(tokens));
+    }
+    Some((title, body))
+}
+
+/// Desktop notification, once per expiry, when `CLAUDE_STATUSLINE_CACHE_NOTIFY` asks for one.
+fn notify_cache_expiry(input: &Input, now: u64) {
+    let var = |name: &str| std::env::var(name).ok();
+    let Some(lead) = notify::lead_secs(var) else {
+        return;
+    };
+    let Some((title, body)) = cache_expiry_alert(input, now, lead) else {
+        return;
+    };
+    let (Some(expires_at), Some(dir)) = (
+        input.prompt_cache.as_ref().and_then(|c| c.expires_at),
+        update::config_dir(var),
+    ) else {
+        return;
+    };
+    let session_id = input.session_id.as_deref().unwrap_or_default();
+    if notify::claim(&dir.join(notify::MARKER_DIR), expires_at, session_id, now) {
+        notify::send(&title, &body);
+    }
 }
 
 /// Newer release than this build, from the once-a-day check's cache.
@@ -524,6 +581,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", format_row(left, right));
     }
 
+    notify_cache_expiry(&input, now);
     Ok(())
 }
 
@@ -662,6 +720,100 @@ mod tests {
     fn cache_is_hidden_when_caching_is_not_observed() {
         let input = input(json!({ "prompt_cache": { "warm": false, "caching_observed": false } }));
         assert!(prompt_cache_section(input.prompt_cache.as_ref().unwrap(), NOW).is_none());
+    }
+
+    #[test]
+    fn cache_alert_fires_only_within_the_lead_time() {
+        let alert = |extra: Value, lead| cache_expiry_alert(&input(extra), NOW, lead);
+        let warm = |remaining: u64, ttl: &str| {
+            json!({ "prompt_cache": {
+                "warm": true, "caching_observed": true, "ttl": ttl,
+                "expires_at": NOW + remaining, "recache_tokens_if_cold": 45_000,
+            }})
+        };
+        let fired = |title: &str, body: &str| Some((title.to_string(), body.to_string()));
+
+        assert_eq!(
+            alert(warm(600, "1h"), 600),
+            fired(
+                "Prompt cache expires in 10m",
+                "demo \u{b7} 45k tokens to re-cache"
+            )
+        );
+        assert_eq!(alert(warm(601, "1h"), 600), None);
+        assert_eq!(
+            alert(warm(40, "5m"), 120),
+            fired(
+                "Prompt cache expires in 40s",
+                "demo \u{b7} 45k tokens to re-cache"
+            )
+        );
+        // A lead time spanning the TTL would fire right after every request
+        assert_eq!(alert(warm(240, "5m"), 600), None);
+        assert_eq!(alert(warm(240, "5m"), 300), None);
+
+        let mut named = warm(300, "1h");
+        named["session_name"] = json!("my-session");
+        named["prompt_cache"]["recache_tokens_if_cold"] = Value::Null;
+        assert_eq!(
+            alert(named, 600),
+            fired("Prompt cache expires in 5m", "my-session")
+        );
+
+        let cold = json!({ "prompt_cache": {
+            "warm": false, "caching_observed": true, "ttl": "1h", "expires_at": null,
+        }});
+        assert_eq!(alert(cold, 600), None);
+        let mut stale = warm(0, "1h");
+        stale["prompt_cache"]["expires_at"] = json!(NOW - 1);
+        assert_eq!(alert(stale, 600), None);
+    }
+
+    #[test]
+    fn cache_notify_lead_time_is_in_whole_minutes() {
+        let set = |value: &'static str| move |_: &str| Some(value.to_string());
+        assert_eq!(notify::lead_secs(set("10")), Some(600));
+        assert_eq!(notify::lead_secs(set(" 3 ")), Some(180));
+        for off in ["0", "", "off", "-5", "1.5", "99999999999999999999"] {
+            assert_eq!(notify::lead_secs(set(off)), None, "{off:?}");
+        }
+        assert_eq!(notify::lead_secs(|_: &str| None), None);
+    }
+
+    #[test]
+    fn cache_notify_claims_once_per_expiry_and_session() {
+        let dir =
+            std::env::temp_dir().join(format!("claude_statusline-claim-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let markers = || {
+            let mut names: Vec<String> = std::fs::read_dir(&dir)
+                .expect("marker directory")
+                .map(|entry| {
+                    entry
+                        .expect("entry")
+                        .file_name()
+                        .into_string()
+                        .expect("utf-8")
+                })
+                .collect();
+            names.sort();
+            names
+        };
+
+        assert!(notify::claim(&dir, NOW + 600, "s1", NOW));
+        assert!(!notify::claim(&dir, NOW + 600, "s1", NOW + 15));
+        assert!(notify::claim(&dir, NOW + 600, "s2", NOW + 15));
+        // A new request moved the expiry: notify again, and drop the markers it outlived
+        assert!(notify::claim(&dir, NOW + 3_000, "s1", NOW + 700));
+        assert_eq!(markers(), [format!("{}-s1", NOW + 3_000)]);
+        // Nothing in the session id reaches outside the directory
+        assert!(notify::claim(&dir, NOW + 3_000, "../x/y", NOW + 700));
+        assert_eq!(
+            markers(),
+            [format!("{}-s1", NOW + 3_000), format!("{}-xy", NOW + 3_000)]
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

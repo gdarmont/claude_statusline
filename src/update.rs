@@ -28,13 +28,17 @@ pub fn enabled(var: impl Fn(&str) -> Option<String>) -> bool {
         && !var("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC").is_some_and(truthy)
 }
 
-/// In Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
-pub fn cache_path(var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+/// Claude Code's config directory: `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+pub fn config_dir(var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
     let non_empty = |name: &str| var(name).filter(|value| !value.is_empty());
-    let dir = non_empty("CLAUDE_CONFIG_DIR")
+    non_empty("CLAUDE_CONFIG_DIR")
         .map(PathBuf::from)
-        .or_else(|| non_empty("HOME").map(|home| Path::new(&home).join(".claude")))?;
-    Some(dir.join(CACHE_FILE))
+        .or_else(|| non_empty("HOME").map(|home| Path::new(&home).join(".claude")))
+}
+
+/// In Claude Code's config directory.
+pub fn cache_path(var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    Some(config_dir(var)?.join(CACHE_FILE))
 }
 
 /// The cached latest tag, starting a background check first when the cache is due.
@@ -73,14 +77,18 @@ fn spawn_check(path: &Path) {
         return;
     };
     let mut command = Command::new(exe);
+    command.arg(CHECK_FLAG).arg(path);
+    spawn_detached(command);
+}
+
+/// Start `command` without waiting for it. Failing to start is silent.
+pub fn spawn_detached(mut command: Command) {
     command
-        .arg(CHECK_FLAG)
-        .arg(path)
-        // An inherited stdout would hold Claude Code until the check finished
+        // An inherited stdout would hold Claude Code until the command finished
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // Its own process group, so Claude Code cancelling this render doesn't kill the check
+    // Its own process group, so Claude Code cancelling this render doesn't kill it
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let _ = command.spawn();

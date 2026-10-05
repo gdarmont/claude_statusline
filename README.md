@@ -36,7 +36,7 @@ Each table entry is one section of the example above, listed left to right.
 | Agent | `security-reviewer` | Orange | Agent the session runs as (`--agent` or agent settings) |
 | Lines changed | `+156/-23` | Olive | Lines added and removed during the session |
 | Context | `37% 74k/200k ↺61k` | Green / Yellow / Red | How full the context window is, tokens used out of its size, and `↺` tokens the last request read from the prompt cache. A `200k+` marker appears past 200k tokens |
-| Prompt cache | `cache 91% 42m` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and minutes until it expires (seconds in the last minute); yellow in the last fifth of its TTL. Needs `refreshInterval` to count down while idle. After a request that missed the cache, `miss: tools changed` names the likely cause until the next request. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed |
+| Prompt cache | `cache 91% 42m` | Cyan / Yellow / Slate | Warm: share of this session's input served from the cache, and minutes until it expires (seconds in the last minute); yellow in the last fifth of its TTL. Needs `refreshInterval` to count down while idle. After a request that missed the cache, `miss: tools changed` names the likely cause until the next request. Cold: `cache cold ↻45k`, the tokens your next message re-caches. Hidden when caching isn't observed. Can also [notify you](#cache-expiry-notification) before it expires |
 | Cost | `$0.42` | Purple | **Right-aligned.** Estimated session cost in USD (hidden below $0.01) |
 | Duration | `12m34s` | Indigo | **Right-aligned.** How long the session has been running |
 | 5-hour limit | `5h 24% (2h13m)` | Green / Yellow / Red | **Right-aligned.** Share of the 5-hour subscription limit used, and time until it resets |
@@ -88,6 +88,29 @@ To turn it off, set `CLAUDE_STATUSLINE_UPDATE_CHECK` to `0`. It is also off when
 ```json
 { "env": { "CLAUDE_STATUSLINE_UPDATE_CHECK": "0" } }
 ```
+
+### Cache expiry notification
+
+The status line can raise a desktop notification shortly before the prompt cache expires, so you
+can send a message while it is still warm instead of paying to re-cache the whole conversation.
+It is off by default. Set `CLAUDE_STATUSLINE_CACHE_NOTIFY` to the lead time, in minutes:
+
+```json
+{ "env": { "CLAUDE_STATUSLINE_CACHE_NOTIFY": "10" } }
+```
+
+The notification reads `Prompt cache expires in 10m`, followed by the session name (or the
+directory) and the tokens the next message re-caches once the cache is cold. It goes through
+`notify-send` on Linux and `osascript` on macOS, started detached so the render never waits for it.
+
+- It needs `refreshInterval` (see [Configure Claude Code](#configure-claude-code)). The cache runs
+  out while you're idle, when nothing else redraws the status line.
+- It fires once per session each time the cache nears expiry. Every request moves the expiry, which
+  re-arms it. Each notification leaves a marker in `~/.claude/claude_statusline.cache-notify/`
+  (`$CLAUDE_CONFIG_DIR` when set), removed once its cache has expired.
+- The lead time must be shorter than the cache TTL. With a 5-minute TTL, use 1 to 4 minutes;
+  longer lead times never fire.
+- It shows on the machine running Claude Code, so it won't reach you through SSH.
 
 ## Requirements
 
@@ -226,8 +249,9 @@ Restart Claude Code for the change to take effect.
 
 `refreshInterval` re-runs the status line every 15 seconds on top of Claude Code's own triggers,
 which fire on events such as a new message or `/compact`. Without it, nothing redraws while you're
-idle: the prompt cache countdown freezes at its last value, and the cache never turns yellow as it
-nears expiry, which is exactly when you'd want to see it. The binary finishes in a few
+idle: the prompt cache countdown freezes at its last value, and the cache never turns yellow or
+[notifies you](#cache-expiry-notification) as it nears expiry, which is exactly when you'd want to
+know. The binary finishes in a few
 milliseconds, so the cost is negligible.
 
 ## Input format
@@ -239,6 +263,7 @@ Claude Code pipes a JSON object to stdin on every refresh. Every field below is 
 
 ```json
 {
+  "session_id": "4b1c6f0e-8d2a-4f5b-9c3e-7a1d2e3f4a5b",
   "session_name": "my-session",
   "model": { "display_name": "Opus" },
   "workspace": {

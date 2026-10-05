@@ -4,6 +4,7 @@ use std::fs;
 use std::io::Write as _;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use unicode_width::UnicodeWidthStr as _;
 
 const STATUSLINE: &str = env!("CARGO_BIN_EXE_claude_statusline");
@@ -20,6 +21,7 @@ fn run(bin: &str, stdin: &str, env: &[(&str, &str)]) -> Output {
         .env_remove("CLAUDE_STATUSLINE_RIGHT_MARGIN")
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+        .env_remove("CLAUDE_STATUSLINE_CACHE_NOTIFY")
         // Tests opt back in, so none of them reach the network or the real ~/.claude
         .env("CLAUDE_STATUSLINE_UPDATE_CHECK", "0")
         .envs(env.iter().copied())
@@ -185,6 +187,70 @@ fn a_due_check_is_claimed_then_left_to_the_background() {
     assert_eq!(visible_lines(&out.stdout).len(), 2, "{}", out.stdout);
     // Stamped before the check starts, so the next renders don't start their own
     assert_eq!(fs::read_to_string(&cache).expect("cache claimed"), "");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_cache_near_expiry_notifies_once() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let dir = config_dir("cache-notify");
+    // Stand-ins for the notifiers, on an otherwise empty PATH, logging what they were asked
+    let bin = dir.join("bin");
+    let log = dir.join("notifications");
+    fs::create_dir_all(&bin).expect("bin directory");
+    for name in ["notify-send", "osascript"] {
+        let script = format!("#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{}'\n", log.display());
+        fs::write(bin.join(name), script).expect("stand-in notifier");
+        fs::set_permissions(bin.join(name), fs::Permissions::from_mode(0o755)).expect("executable");
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after 1970")
+        .as_secs();
+    let payload = format!(
+        r#"{{
+            "session_id": "abc-123",
+            "workspace": {{"current_dir": "/nonexistent/demo"}},
+            "model": {{"display_name": "Opus"}},
+            "prompt_cache": {{
+                "warm": true, "caching_observed": true, "ttl": "1h", "expires_at": {}
+            }}
+        }}"#,
+        now + 330
+    );
+    let env = [
+        ("CLAUDE_CONFIG_DIR", dir.to_str().expect("utf-8 path")),
+        ("CLAUDE_STATUSLINE_CACHE_NOTIFY", "10"),
+        ("PATH", bin.to_str().expect("utf-8 path")),
+    ];
+    for _ in 0..3 {
+        let out = run(STATUSLINE, &payload, &env);
+        assert_eq!(visible_lines(&out.stdout).len(), 2, "{}", out.stdout);
+    }
+
+    // One marker for this expiry, so only the first render notified
+    let markers = fs::read_dir(dir.join("claude_statusline.cache-notify"))
+        .expect("marker directory")
+        .count();
+    assert_eq!(markers, 1);
+
+    // The notifier runs detached, so give it a moment to land
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let logged = loop {
+        let logged = fs::read_to_string(&log).unwrap_or_default();
+        if logged.contains("demo") || Instant::now() > deadline {
+            break logged;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(
+        logged.matches("Prompt cache expires in 5m").count(),
+        1,
+        "{logged}"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
