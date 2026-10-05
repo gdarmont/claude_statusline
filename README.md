@@ -248,11 +248,11 @@ In `~/.claude/settings.json`:
 Restart Claude Code for the change to take effect.
 
 `refreshInterval` re-runs the status line every 15 seconds on top of Claude Code's own triggers,
-which fire on events such as a new message or `/compact`. Without it, nothing redraws while you're
-idle: the prompt cache countdown freezes at its last value, and the cache never turns yellow or
+which fire on events such as a new message or `/compact`, and once when the prompt cache expires or
+a rate limit resets. Without it, the countdowns freeze while you're idle: the cache shows the time
+left at your last message until it turns cold, and never turns yellow or
 [notifies you](#cache-expiry-notification) as it nears expiry, which is exactly when you'd want to
-know. The binary finishes in a few
-milliseconds, so the cost is negligible.
+know. The binary finishes in a few milliseconds, so the cost is negligible.
 
 ## Input format
 
