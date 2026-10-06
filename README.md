@@ -304,6 +304,11 @@ is what the activity sparkline measures.
 Both schemas below were last checked against Claude Code **v2.1.291**. Newer releases add fields
 the renderer ignores, and a field whose type changes hides its section instead of breaking the line.
 
+To see what a newer Claude Code changed, run `python3 docs/check_schema.py`. It reads both payloads
+from the installed `claude` binary and diffs them against
+[`docs/claude-code-payloads.txt`](docs/claude-code-payloads.txt), the full schemas as last checked.
+Once the renderer and this README handle the changes, `--update` records the new version in both.
+
 Claude Code pipes a JSON object to stdin on every refresh. Every field below is optional except `workspace.current_dir` and `model.display_name`:
 
 ```json

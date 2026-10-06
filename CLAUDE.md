@@ -35,7 +35,7 @@ cargo +1.88 test                            # the declared rust-version
 - Never block the render on the network. Anything slow goes to a detached process with stdout and stderr set to null, because an inherited stdout makes Claude Code wait for it. `tests/cli.rs` turns the update check off unless a test opts back in.
 - `unsafe_code` is forbidden. Keep dependencies minimal: serde, serde_json, unicode-width.
 - When a section, input field or env var changes, update `README.md` to match.
-- `README.md` § Input format records the Claude Code version both schemas were last checked against. Bump it whenever you re-check them. The installed `claude` binary embeds the `statusLine` schema with comments, in the statusline-setup agent prompt (search it for `recache_tokens_if_cold`). The subagent payload is built next to the `subagentStatusLine` string (search for `tokenSamples`).
+- `README.md` § Input format records the Claude Code version both schemas were last checked against. Re-check them with `python3 docs/check_schema.py`, which diffs the installed `claude` binary against `docs/claude-code-payloads.txt`; once the changes are handled, `--update` records the new version there and in the README. When it can't find a payload, look by hand: the binary embeds the `statusLine` schema with comments in the statusline-setup agent prompt (search it for `recache_tokens_if_cold`), and builds the subagent payload next to the `subagentStatusLine` string (search for `tokenSamples`).
 
 ## Commits
 
