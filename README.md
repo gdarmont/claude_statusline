@@ -85,8 +85,18 @@ Claude Code captures the script's stdout, so `tput cols` cannot see the terminal
 the right one against the edge. Widths are measured in terminal cells with `unicode-width`, not
 bytes or chars, so the powerline glyphs and emoji markers line up.
 
-It degrades rather than wraps. When `COLUMNS` is unset, or the two groups would collide on a
-narrow terminal, everything renders as one continuous powerline with no padding.
+It degrades rather than wraps. When the two groups would collide on a narrow terminal, they join
+into one continuous powerline with no padding. When even that doesn't fit, sections are dropped,
+least useful first, until the row fits, instead of Claude Code clipping whatever reaches the right
+edge:
+
+- **Row 1:** session name, update notice, worktree, pull request, then git branch. The directory
+  always stays.
+- **Row 2:** lines changed, duration, agent, cost, 7-day limit, prompt cache, spend limit, 5-hour
+  limit, then context. The model always stays.
+
+Sections go strictly in that order: none is hidden while one earlier in its list still shows. When
+`COLUMNS` is unset, the width is unknown, so the row renders whole as one continuous powerline.
 
 `COLUMNS` is the full terminal width, but Claude Code draws the status line inside its own chrome
 and truncates whatever overflows, so five cells are held back from the right edge. Change that with
@@ -98,7 +108,8 @@ gap looks too wide:
 ```
 
 To move a section between sides, move its `Section::new(...)` push between the `sections` and
-`right` vectors in `location_sections` / `session_sections` in `src/main.rs`.
+`right` vectors in `location_sections` / `session_sections` in `src/main.rs`. The drop order is the
+`priority` module next to them.
 
 ### Update check
 

@@ -233,6 +233,26 @@ fn dir_name(input: &Input) -> &str {
         .unwrap_or(&input.workspace.current_dir)
 }
 
+/// Priorities for a row too wide for the terminal: the lowest is dropped first. Each row
+/// ranks its own sections, and the directory and the model are never dropped.
+mod priority {
+    pub const SESSION_NAME: u8 = 0;
+    pub const UPDATE: u8 = 1;
+    pub const WORKTREE: u8 = 2;
+    pub const PR: u8 = 3;
+    pub const BRANCH: u8 = 4;
+
+    pub const LINES: u8 = 0;
+    pub const DURATION: u8 = 1;
+    pub const AGENT: u8 = 2;
+    pub const COST: u8 = 3;
+    pub const SEVEN_DAY: u8 = 4;
+    pub const CACHE: u8 = 5;
+    pub const SPEND: u8 = 6;
+    pub const FIVE_HOUR: u8 = 7;
+    pub const CONTEXT: u8 = 8;
+}
+
 /// First row: where the work is happening. Session name sits on the right.
 fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
     let mut sections = Vec::new();
@@ -253,7 +273,9 @@ fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         .and_then(|w| w.branch.clone())
         .or_else(|| get_git_branch(&input.workspace.current_dir));
     if let Some(branch) = branch {
-        sections.push(Section::new(format!("\u{e0a0} {branch}"), GREEN, WHITE));
+        sections.push(
+            Section::new(format!("\u{e0a0} {branch}"), GREEN, WHITE).priority(priority::BRANCH),
+        );
     }
 
     // Worktree: `--worktree` session, or a plain linked git worktree
@@ -271,7 +293,7 @@ fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         {
             let _ = write!(text, " \u{2190} {original}");
         }
-        sections.push(Section::new(text, TEAL, WHITE));
+        sections.push(Section::new(text, TEAL, WHITE).priority(priority::WORKTREE));
     }
 
     // Open pull request for the current branch
@@ -292,14 +314,18 @@ fn location_sections(input: &Input) -> (Vec<Section>, Vec<Section>) {
         if let Some(state) = &pr.review_state {
             let _ = write!(text, " {}", state.replace('_', " "));
         }
-        sections.push(Section::new(text, bg, fg).link(pr.url.clone()));
+        sections.push(
+            Section::new(text, bg, fg)
+                .link(pr.url.clone())
+                .priority(priority::PR),
+        );
     }
 
     // Session name, when one was set explicitly or generated
     let right = input
         .session_name
         .as_ref()
-        .map(|name| Section::new(name.clone(), SLATE, WHITE))
+        .map(|name| Section::new(name.clone(), SLATE, WHITE).priority(priority::SESSION_NAME))
         .into_iter()
         .collect();
 
@@ -329,7 +355,7 @@ fn session_sections(input: &Input, now: u64) -> (Vec<Section>, Vec<Section>) {
 
     // Named agent (`--agent` or agent settings)
     if let Some(name) = input.agent.as_ref().and_then(|a| a.name.as_ref()) {
-        sections.push(Section::new(name.clone(), ORANGE, WHITE));
+        sections.push(Section::new(name.clone(), ORANGE, WHITE).priority(priority::AGENT));
     }
 
     if let Some(cost) = &input.cost {
@@ -337,21 +363,26 @@ fn session_sections(input: &Input, now: u64) -> (Vec<Section>, Vec<Section>) {
         if let Some(usd) = cost.total_cost_usd
             && usd >= 0.01
         {
-            right.push(Section::new(format!("${usd:.2}"), PURPLE, WHITE));
+            right.push(Section::new(format!("${usd:.2}"), PURPLE, WHITE).priority(priority::COST));
         }
 
         // Lines changed this session
         let added = cost.total_lines_added.unwrap_or(0);
         let removed = cost.total_lines_removed.unwrap_or(0);
         if added > 0 || removed > 0 {
-            sections.push(Section::new(format!("+{added}/-{removed}"), OLIVE, WHITE));
+            sections.push(
+                Section::new(format!("+{added}/-{removed}"), OLIVE, WHITE)
+                    .priority(priority::LINES),
+            );
         }
 
         // Wall-clock session duration
         if let Some(ms) = cost.total_duration_ms
             && ms >= 1_000
         {
-            right.push(Section::new(fmt_duration_ms(ms), INDIGO, WHITE));
+            right.push(
+                Section::new(fmt_duration_ms(ms), INDIGO, WHITE).priority(priority::DURATION),
+            );
         }
     }
 
@@ -377,23 +408,29 @@ fn session_sections(input: &Input, now: u64) -> (Vec<Section>, Vec<Section>) {
         if input.exceeds_200k_tokens == Some(true) {
             text.push_str(" 200k+");
         }
-        sections.push(Section::new(text, bg, fg));
+        sections.push(Section::new(text, bg, fg).priority(priority::CONTEXT));
     }
 
     if let Some(cache) = &input.prompt_cache {
-        sections.extend(prompt_cache_section(cache, now));
+        sections.extend(prompt_cache_section(cache, now).map(|s| s.priority(priority::CACHE)));
     }
 
     // Subscription rate limits
     if let Some(limits) = &input.rate_limits {
         if let Some(window) = &limits.five_hour {
-            right.extend(rate_limit_section("5h", window, now));
+            right.extend(
+                rate_limit_section("5h", window, now).map(|s| s.priority(priority::FIVE_HOUR)),
+            );
         }
         if let Some(window) = &limits.seven_day {
-            right.extend(rate_limit_section("7d", window, now));
+            right.extend(
+                rate_limit_section("7d", window, now).map(|s| s.priority(priority::SEVEN_DAY)),
+            );
         }
         if let Some(window) = &limits.spend_limit {
-            right.extend(rate_limit_section("spend", window, now));
+            right.extend(
+                rate_limit_section("spend", window, now).map(|s| s.priority(priority::SPEND)),
+            );
         }
     }
 
@@ -561,7 +598,7 @@ fn update_notice(now: u64) -> Option<Section> {
         return None;
     }
     let latest = update::latest_release(&update::cache_path(var)?, now)?;
-    update::notice(&latest, env!("CARGO_PKG_VERSION"))
+    update::notice(&latest, env!("CARGO_PKG_VERSION")).map(|s| s.priority(priority::UPDATE))
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -1028,6 +1065,95 @@ mod tests {
         ]);
         assert_eq!(row(Some(10)).width(), continuous);
         assert_eq!(row(None).width(), continuous);
+    }
+
+    /// Narrows `sections` one cell at a time and checks that they drop out in `order`,
+    /// only once the joined row no longer fits, and that what is left then fits.
+    fn assert_drops_in_order(sections: impl Fn() -> (Vec<Section>, Vec<Section>), order: &[&str]) {
+        let row = |usable| {
+            let (left, right) = sections();
+            strip_ansi(&format_row_within(left, right, Some(usable)))
+        };
+        let (left, right) = sections();
+        let joined = group_width(&left.into_iter().chain(right).collect::<Vec<_>>());
+
+        for usable in (1..=joined + 10).rev() {
+            let row = row(usable);
+            let dropped = order.iter().take_while(|text| !row.contains(*text)).count();
+            assert!(
+                order[dropped..].iter().all(|text| row.contains(text)),
+                "{usable}: {row}"
+            );
+            if usable >= joined {
+                assert_eq!(dropped, 0, "{usable}: {row}");
+            } else {
+                assert!(dropped > 0, "{usable}: {row}");
+                if dropped < order.len() {
+                    assert!(row.width() <= usable, "{usable}: {row}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_narrow_session_row_drops_its_least_useful_sections_first() {
+        let input = input(json!({
+            "agent": { "name": "reviewer" },
+            "cost": {
+                "total_cost_usd": 0.42, "total_duration_ms": 754_000,
+                "total_lines_added": 156, "total_lines_removed": 23,
+            },
+            "context_window": {
+                "used_percentage": 37.2, "total_input_tokens": 74_500, "context_window_size": 200_000,
+            },
+            "prompt_cache": {
+                "warm": true, "caching_observed": true, "ttl": "1h",
+                "expires_at": NOW + 2_520, "hit_ratio": 0.91,
+            },
+            "rate_limits": {
+                "five_hour": { "used_percentage": 23.5, "resets_at": NOW + 7_980 },
+                "seven_day": { "used_percentage": 41.2, "resets_at": NOW + 277_200 },
+                "spend_limit": { "used_percentage": 62.8, "resets_at": NOW + 12 * 86_400 },
+            },
+        }));
+        assert_drops_in_order(
+            || session_sections(&input, NOW),
+            &[
+                "+156/-23",
+                "12m34s",
+                "reviewer",
+                "$0.42",
+                "7d 41%",
+                "cache 91%",
+                "spend 63%",
+                "5h 24%",
+                "37% 74k",
+            ],
+        );
+    }
+
+    #[test]
+    fn a_narrow_location_row_keeps_the_directory_longest() {
+        let input = input(json!({
+            "session_name": "my-session",
+            "worktree": { "name": "my-feature", "branch": "worktree-my-feature", "original_branch": "master" },
+            "pr": { "number": 1234, "review_state": "approved" },
+        }));
+        assert_drops_in_order(
+            || location_sections(&input),
+            &[
+                "my-session",
+                "\u{29c9} my-feature",
+                "PR #1234",
+                "\u{e0a0} worktree-my-feature",
+            ],
+        );
+        // The directory is all that is left
+        let (left, right) = location_sections(&input);
+        assert_eq!(
+            strip_ansi(&format_row_within(left, right, Some(1))),
+            strip_ansi(&format_sections(&[Section::new("demo", BLUE, WHITE)]))
+        );
     }
 
     #[test]

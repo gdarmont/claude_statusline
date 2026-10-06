@@ -47,12 +47,17 @@ pub const OLIVE: Rgb = Rgb(58, 84, 52);
 pub const INDIGO: Rgb = Rgb(66, 66, 96);
 pub const CYAN: Rgb = Rgb(34, 110, 140);
 
+/// Priority of a section that is never dropped from a row too wide for the terminal.
+pub const ESSENTIAL: u8 = u8::MAX;
+
 pub struct Section {
     pub text: String,
     pub bg: Rgb,
     pub fg: Rgb,
     /// When set, the whole cell becomes an OSC 8 hyperlink.
     pub url: Option<String>,
+    /// A row too wide for the terminal drops its lowest priority sections first.
+    pub priority: u8,
 }
 
 impl Section {
@@ -62,11 +67,17 @@ impl Section {
             bg,
             fg,
             url: None,
+            priority: ESSENTIAL,
         }
     }
 
     pub fn link(mut self, url: Option<String>) -> Self {
         self.url = url;
+        self
+    }
+
+    pub fn priority(mut self, priority: u8) -> Self {
+        self.priority = priority;
         self
     }
 }
@@ -173,32 +184,65 @@ pub fn format_row(left: Vec<Section>, right: Vec<Section>) -> String {
 
 /// Render `left` flush left and `right` flush right within `usable` cells.
 ///
-/// Falls back to one continuous powerline when the width is unknown or the two
-/// groups would collide, so a narrow terminal degrades instead of wrapping.
+/// When the two groups would collide, they join into one continuous powerline.
+/// When even that is too wide, the lowest priority sections are dropped until it
+/// fits, rather than leaving Claude Code to clip whatever reaches the right edge.
+/// An unknown width gets the continuous powerline, whole.
 pub fn format_row_within(
     mut left: Vec<Section>,
-    right: Vec<Section>,
+    mut right: Vec<Section>,
     usable: Option<usize>,
 ) -> String {
-    if right.is_empty() {
-        return format_sections(&left);
-    }
-
-    let total = group_width(&left) + group_width(&right);
     if let Some(usable) = usable {
-        // Strictly less, so there is always at least one cell of daylight.
-        if total < usable {
-            return format!(
-                "{}{}{}",
-                format_sections(&left),
-                " ".repeat(usable - total),
-                format_sections(&right)
-            );
+        loop {
+            let total = group_width(&left) + group_width(&right);
+            // Strictly less, so there is always at least one cell of daylight.
+            if !right.is_empty() && total < usable {
+                return format!(
+                    "{}{}{}",
+                    format_sections(&left),
+                    " ".repeat(usable - total),
+                    format_sections(&right)
+                );
+            }
+            if joined_width(&left, &right) <= usable || !drop_lowest(&mut left, &mut right) {
+                break;
+            }
         }
     }
 
     left.extend(right);
     format_sections(&left)
+}
+
+/// Cells of `left` and `right` drawn as one continuous powerline: the two inner
+/// caps become a single separator.
+fn joined_width(left: &[Section], right: &[Section]) -> usize {
+    if left.is_empty() || right.is_empty() {
+        group_width(left) + group_width(right)
+    } else {
+        group_width(left) + group_width(right) - 1
+    }
+}
+
+/// Remove the lowest priority section of either group. False when only essential
+/// sections are left.
+fn drop_lowest(left: &mut Vec<Section>, right: &mut Vec<Section>) -> bool {
+    let in_left = left.iter().enumerate().map(|(i, s)| (s.priority, false, i));
+    let in_right = right.iter().enumerate().map(|(i, s)| (s.priority, true, i));
+    let Some((_, right_group, index)) = in_left
+        .chain(in_right)
+        .filter(|&(priority, ..)| priority < ESSENTIAL)
+        .min_by_key(|&(priority, ..)| priority)
+    else {
+        return false;
+    };
+    if right_group {
+        right.remove(index);
+    } else {
+        left.remove(index);
+    }
+    true
 }
 
 /// Green / yellow / red pair for a usage percentage.
