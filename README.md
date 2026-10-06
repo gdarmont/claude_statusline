@@ -13,6 +13,8 @@ The output is two rows: the first says *where* you are working, the second says 
 
 Each row is split into a left group and a right group pinned to the right edge, so spend and rate limits keep a fixed screen position instead of drifting as the left side grows.
 
+A second binary, `claude_subagent_statusline`, draws the rows of the agent panel below the prompt (the bottom two rows of the screenshot): one per subagent, with its model, context use, recent activity and running time. See [Agent panel](#agent-panel).
+
 ## Sections
 
 Each table entry is one section of the example above, listed left to right.
@@ -47,6 +49,33 @@ Threshold colors for context and rate limits:
 - **Green** -- 0-59%
 - **Yellow** -- 60-80%
 - **Red** -- above 80%
+
+### Agent panel
+
+`claude_subagent_statusline` replaces the body of each subagent row in the agent panel below the
+prompt:
+
+```
+● Explore · scanning src/ · opus-5 high · 12k/200k 6% · ▁▄▆▁▂▆█▂ · 2m14s
+✓ security-reviewer · review install.sh · sonnet-5-5 medium · 48k/200k 24%
+```
+
+Each table entry is one column of the first row, listed left to right. Columns are separated by
+`·` and hidden when their data is absent.
+
+| Column | Example | Color | Description |
+|--------|---------|-------|-------------|
+| Status | `●` | State-colored | Green `●` running, yellow `○` pending, blue `✓` completed, red `✗` failed or killed, slate `●` anything else, such as paused |
+| Name | `Explore` | White | Name the subagent was spawned with. A subagent without one shows `task` |
+| Detail | `scanning src/` | Dim | What the subagent is doing now, or its task description. Truncated with `…` to the room left, and dropped when less than 8 cells remain |
+| Model | `opus-5 high` | Dim | Model ID without the `claude-` prefix and date suffix, then the effort set for that subagent: a level, or a token budget such as `16k` |
+| Context | `12k/200k 6%` | Green / Yellow / Red | Tokens in the subagent's context out of its model's window, and the share used, with the same thresholds as the main context. Only the token count, dimmed, when the window size is unknown. Hidden until the subagent reports tokens |
+| Activity | `▁▄▆▁▂▆█▂` | Dim | **Running only.** Tokens gained in each of the last eight refresh intervals (about five seconds each), scaled to the busiest one. A flat `▁▁▁` is a subagent that has stopped producing tokens, for example while a long tool call runs |
+| Running time | `2m14s` | Dim | **Running only.** How long the subagent has been running. A finished subagent doesn't report when it ended, so it gets neither this column nor the activity |
+
+A row never wraps. Claude Code reports the width left for the row body, and the name, model and
+context always show. Running time, then activity, are added only if they fit while leaving 8 cells
+for the detail, which then fills whatever is left.
 
 ### Right alignment
 
@@ -254,9 +283,13 @@ left at your last message until it turns cold, and never turns yellow or
 [notifies you](#cache-expiry-notification) as it nears expiry, which is exactly when you'd want to
 know. The binary finishes in a few milliseconds, so the cost is negligible.
 
+`subagentStatusLine` takes no `refreshInterval`. Claude Code runs it shortly after a subagent
+appears in the agent panel or leaves it, then every five seconds while any is shown, and that tick
+is what the activity sparkline measures.
+
 ## Input format
 
-Both schemas below were last checked against Claude Code **v2.1.289**. Newer releases add fields
+Both schemas below were last checked against Claude Code **v2.1.291**. Newer releases add fields
 the renderer ignores, and a field whose type changes hides its section instead of breaking the line.
 
 Claude Code pipes a JSON object to stdin on every refresh. Every field below is optional except `workspace.current_dir` and `model.display_name`:
@@ -320,35 +353,45 @@ Notes on availability:
 
 ### Subagent rows
 
-`claude_subagent_statusline` receives all visible subagent rows at once and writes one
-`{"id": ..., "content": ...}` line per row:
+`claude_subagent_statusline` receives every visible subagent row at once and writes one
+`{"id": ..., "content": ...}` line per row (see [Agent panel](#agent-panel) for what it draws).
+Every field is optional except `id`:
 
 ```json
 {
+  "session_id": "4b1c6f0e-8d2a-4f5b-9c3e-7a1d2e3f4a5b",
+  "cwd": "/home/user/projects/myproject",
   "columns": 80,
   "tasks": [
     {
-      "id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
-      "description": "Search the repo", "model": "claude-opus-5", "effort": "high",
-      "contextWindowSize": 200000, "tokenCount": 12500, "startTime": 1738425466000,
-      "tokenSamples": [0, 0, 500, 1500, 1500, 1600]
+      "id": "t1", "name": "Explore", "type": "local_agent", "status": "running",
+      "label": "scanning src/", "description": "Search the repo",
+      "model": "claude-opus-5", "effort": "high", "contextWindowSize": 200000,
+      "tokenCount": 12500, "startTime": 1738425466000,
+      "tokenSamples": [0, 0, 500, 1500, 1500, 1600],
+      "cwd": "/home/user/projects/myproject"
     }
   ]
 }
 ```
 
-Rows render as `● Explore · scanning src/ · opus-5 high · 12k/200k 6% · ▁▅█▁▂ · 2m14s`. The detail
-column is truncated to fit `columns` and dropped entirely when there is no room for it.
+Notes on availability:
 
-While a task runs, two more columns follow when they fit next to a minimal detail column:
+- The payload also carries the [common hook fields](https://code.claude.com/docs/en/hooks#common-input-fields)
+  such as `session_id` and `transcript_path`. The renderer ignores them, along with `type` and each
+  task's `cwd`
+- `columns` is the width left for the row body once Claude Code has drawn its own indent
+- `name` is set only for a subagent given a name when it was spawned, so that other agents can
+  message it
+- `status` is `pending`, `running`, `completed`, `failed`, `killed` or `paused`
+- `label` is what the subagent reports doing now, and falls back to `description`
+- `tokenCount` is `0` until the subagent reports progress. `tokenSamples` holds its value at each of
+  the last 16 refresh ticks, oldest first. `startTime` is in Unix milliseconds
+- `model` and `contextWindowSize` need v2.1.205+, and are absent until the subagent's model is
+  resolved. `effort` needs v2.1.214+, and is absent when the subagent inherits the session's effort
 
-- A sparkline of the tokens gained between recent `tokenSamples` (Claude Code samples about every
-  five seconds), up to the last eight intervals, scaled to the busiest one. A flat `▁▁▁` is an
-  agent that has stopped producing tokens.
-- How long the task has been running. A finished task doesn't report when it ended, so it gets
-  neither column.
-
-`model` and `contextWindowSize` need Claude Code v2.1.205+; `effort` needs v2.1.214+.
+A task missing from the output keeps Claude Code's default row (`name · description · token
+count`), and so does every task when the command fails or takes more than five seconds.
 
 ## Testing
 
@@ -362,7 +405,9 @@ and the tests on Linux and macOS, plus a build on the `rust-version` from `Cargo
 
 A field whose type changes in a new Claude Code release is treated as absent, so only its section
 disappears. If the whole line shows `[statusline]` instead, the payload itself couldn't be parsed;
-the reason is on stderr, which `claude --debug` logs.
+the reason is on stderr, which `claude --debug` logs. The subagent binary prints nothing in that
+case, so the agent panel falls back to Claude Code's default rows, and a single task it can't
+parse keeps its default row while the others still render.
 
 To try a payload by hand:
 
