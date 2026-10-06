@@ -66,16 +66,17 @@ Each table entry is one column of the first row, listed left to right. Columns a
 | Column | Example | Color | Description |
 |--------|---------|-------|-------------|
 | Status | `●` | State-colored | Green `●` running, yellow `○` pending, blue `✓` completed, red `✗` failed or killed, slate `●` anything else, such as paused |
-| Name | `Explore` | White | Name the subagent was spawned with. A subagent without one shows `task` |
-| Detail | `scanning src/` | Dim | What the subagent is doing now, or its task description. Truncated with `…` to the room left, and dropped when less than 8 cells remain |
+| Name | `Explore` | White | Name the subagent was spawned with. Most subagents have none and show their task description instead, such as `Search the repo` |
+| Detail | `scanning src/` | Dim | What the subagent is doing now, or its task description when the name doesn't already show it. Truncated with `…` to the room left, and dropped when less than 8 cells remain |
 | Model | `opus-5 high` | Dim | Model ID without the `claude-` prefix and date suffix, then the effort set for that subagent: a level, or a token budget such as `16k` |
 | Context | `12k/200k 6%` | Green / Yellow / Red | Tokens in the subagent's context out of its model's window, and the share used, with the same thresholds as the main context. Only the token count, dimmed, when the window size is unknown. Hidden until the subagent reports tokens |
 | Activity | `▁▄▆▁▂▆█▂` | Dim | **Running only.** Tokens gained in each of the last eight refresh intervals (about five seconds each), scaled to the busiest one. A flat `▁▁▁` is a subagent that has stopped producing tokens, for example while a long tool call runs |
 | Running time | `2m14s` | Dim | **Running only.** How long the subagent has been running. A finished subagent doesn't report when it ended, so it gets neither this column nor the activity |
 
 A row never wraps. Claude Code reports the width left for the row body, and the name, model and
-context always show. Running time, then activity, are added only if they fit while leaving 8 cells
-for the detail, which then fills whatever is left.
+context always show, the name truncated if they wouldn't fit otherwise. Running time, then
+activity, are added only if they fit while leaving 8 cells for the detail, which then fills
+whatever is left.
 
 ### Right alignment
 
@@ -382,7 +383,7 @@ Notes on availability:
   task's `cwd`
 - `columns` is the width left for the row body once Claude Code has drawn its own indent
 - `name` is set only for a subagent given a name when it was spawned, so that other agents can
-  message it
+  message it. The others are titled by their `description`
 - `status` is `pending`, `running`, `completed`, `failed`, `killed` or `paused`
 - `label` is what the subagent reports doing now, and falls back to `description`
 - `tokenCount` is `0` until the subagent reports progress. `tokenSamples` holds its value at each of

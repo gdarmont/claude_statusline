@@ -156,12 +156,16 @@ fn insert_if_fits(
 fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
     let (marker, marker_color) = status_marker(task.status.as_deref());
 
+    // Claude Code names only the subagents spawned with a name, so most are told
+    // apart by the description of their task
+    let title = [&task.name, &task.description]
+        .into_iter()
+        .flatten()
+        .find(|text| !text.is_empty())
+        .map_or("task", String::as_str);
+
     // Fixed columns, in display order
-    let mut parts: Vec<(String, Rgb)> = Vec::new();
-    parts.push((
-        task.name.clone().unwrap_or_else(|| "task".to_string()),
-        WHITE,
-    ));
+    let mut parts: Vec<(String, Rgb)> = vec![(title.to_string(), WHITE)];
 
     let mut model_text = task.model.as_deref().map(short_model).unwrap_or_default();
     if let Some(effort) = &task.effort {
@@ -187,11 +191,21 @@ fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
         parts.push((text, color));
     }
 
+    // A long title gives way before the model and context do
+    if let Some(columns) = columns {
+        let overflow = row_width(marker, &parts).saturating_sub(columns);
+        if overflow > 0 {
+            parts[0].0 = truncate(title, title.width().saturating_sub(overflow));
+        }
+    }
+
+    // Claude Code falls back to the description when the subagent reports no
+    // progress, which would repeat a description already shown as the title
     let detail = task
         .label
         .clone()
         .or_else(|| task.description.clone())
-        .filter(|d| !d.is_empty());
+        .filter(|d| !d.is_empty() && d != title);
 
     // Running time, then recent activity before it, each only when it fits next to the
     // detail's minimum: what the agent is doing matters more. A finished task reports
@@ -308,6 +322,55 @@ mod tests {
             row,
             "\u{25cf} Explore \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6% \u{b7} \u{2581}\u{2585}\u{2588}\u{2581}\u{2582} \u{b7} 2m14s"
         );
+    }
+
+    #[test]
+    fn an_unnamed_subagent_is_titled_by_its_description() {
+        let row = |fields: serde_json::Value| {
+            let mut task = explore();
+            let object = task.as_object_mut().expect("task is an object");
+            object.remove("name");
+            object.insert("description".into(), json!("Search the repo"));
+            object.extend(fields.as_object().expect("fields are an object").clone());
+            let input = parse(&json!({ "tasks": [task] }));
+            strip_ansi(&render_row(&input.tasks[0], None, NOW))
+        };
+        assert!(
+            row(json!({}))
+                .starts_with("\u{25cf} Search the repo \u{b7} scanning src/ \u{b7} opus-5"),
+            "{}",
+            row(json!({}))
+        );
+        // Claude Code's fallback label, when there is no progress to report
+        let repeated = row(json!({ "label": "Search the repo" }));
+        assert!(
+            repeated.starts_with("\u{25cf} Search the repo \u{b7} opus-5"),
+            "{repeated}"
+        );
+        let empty_name = row(json!({ "name": "" }));
+        assert!(
+            empty_name.starts_with("\u{25cf} Search the repo \u{b7}"),
+            "{empty_name}"
+        );
+        let untitled = row(json!({ "description": "", "label": null }));
+        assert!(untitled.starts_with("\u{25cf} task \u{b7}"), "{untitled}");
+    }
+
+    #[test]
+    fn a_long_title_gives_way_before_the_model_and_context() {
+        let mut task = explore();
+        task.as_object_mut()
+            .expect("task is an object")
+            .remove("name");
+        task["description"] = json!("Audit every dependency for known vulnerabilities");
+        let input = parse(&json!({ "tasks": [task] }));
+
+        let row = strip_ansi(&render_row(&input.tasks[0], Some(50), NOW));
+        assert_eq!(
+            row,
+            "\u{25cf} Audit every depende\u{2026} \u{b7} opus-5 high \u{b7} 12k/200k 6%"
+        );
+        assert_eq!(row.width(), 50);
     }
 
     #[test]
