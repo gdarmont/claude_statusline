@@ -194,10 +194,20 @@ To update, run the same command again. Claude Code switches to the new version o
 line refresh, without a restart. What changed in each version is on the
 [releases page](https://github.com/gdarmont/claude_statusline/releases).
 
+The first time, it also asks about the two optional features: the
+[cache expiry notification](#cache-expiry-notification), off by default, and the daily
+[update check](#update-check), on by default. It saves the answers in the `env` block of
+`settings.json` with `jq`, after copying the file to `settings.json.claude_statusline.bak`, and
+writes through a symlinked `settings.json` rather than replacing it. Without `jq`, or when
+`settings.json` isn't valid JSON, it prints the block to paste instead. Every answer is saved, a no
+included, so updates don't ask again. A setting already in `settings.json` or in the environment is
+never asked about.
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CLAUDE_DIR` | `~/.claude` | Install directory |
 | `VERSION` | latest release | Pin to a specific tag, e.g. `v0.9.0` |
+| `NONINTERACTIVE` | unset | `1` skips the questions and lists the optional settings instead, as happens with no terminal |
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
