@@ -210,6 +210,13 @@ It writes every change at once with `jq`, after copying the file to
 replacing it. Without `jq`, without a terminal, or when `settings.json` isn't valid JSON, it leaves
 the file alone and prints what to add instead.
 
+To run only this setup again, for the binaries already installed, pass `--settings-only`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
+  | bash -s -- --settings-only
+```
+
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CLAUDE_DIR` | `~/.claude` | Install directory |
@@ -227,8 +234,8 @@ curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/i
 ./dev-install.sh
 ```
 
-Builds both binaries in release mode, installs them the same way, and smoke-tests what landed. Or
-by hand:
+Builds both binaries in release mode, installs them the same way, smoke-tests what landed, and
+then runs `./install.sh --settings-only` to set up `settings.json`. Or by hand:
 
 ```sh
 cargo build --release

@@ -20,7 +20,7 @@ cargo test
 cargo clippy --all-targets -- -D warnings   # what CI runs; pedantic is on
 cargo fmt
 cargo +1.88 test                            # the declared rust-version
-./dev-install.sh                            # build, install to ~/.claude/, smoke-test
+./dev-install.sh                            # build, install to ~/.claude/, smoke-test, set up settings.json
 ```
 
 `.github/workflows/ci.yml` runs fmt, clippy, shellcheck on the install scripts, tests on Linux and macOS, and a test on the `rust-version` from `Cargo.toml`. Bump `rust-version` when using a newer language feature.

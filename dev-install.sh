@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build both binaries in release mode, back up the installed statusline once,
-# replace it, and smoke-test what actually landed in ~/.claude.
+# replace it, smoke-test what actually landed in ~/.claude, then offer to set it
+# up in settings.json the way install.sh does.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -38,3 +39,5 @@ echo "--- claude_subagent_statusline ---"
 {"columns":80,"tasks":[{"id":"t1","name":"Explore","status":"running","label":"scanning src/",
  "model":"claude-opus-5","effort":"high","contextWindowSize":200000,"tokenCount":12500}]}
 JSON
+
+CLAUDE_DIR="$DEST" ./install.sh --settings-only
