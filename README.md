@@ -194,20 +194,27 @@ To update, run the same command again. Claude Code switches to the new version o
 line refresh, without a restart. What changed in each version is on the
 [releases page](https://github.com/gdarmont/claude_statusline/releases).
 
-The first time, it also asks about the two optional features: the
-[cache expiry notification](#cache-expiry-notification), off by default, and the daily
-[update check](#update-check), on by default. It saves the answers in the `env` block of
-`settings.json` with `jq`, after copying the file to `settings.json.claude_statusline.bak`, and
-writes through a symlinked `settings.json` rather than replacing it. Without `jq`, or when
-`settings.json` isn't valid JSON, it prints the block to paste instead. Every answer is saved, a no
-included, so updates don't ask again. A setting already in `settings.json` or in the environment is
-never asked about.
+It then sets up `settings.json`, asking first:
+
+- The two optional features: the [cache expiry notification](#cache-expiry-notification), off by
+  default, and the daily [update check](#update-check), on by default. Every answer is saved in the
+  `env` block, a no included, so updates don't ask again. A setting already in `settings.json` or in
+  the environment is never asked about.
+- The [`statusLine` and `subagentStatusLine` blocks](#configure-claude-code), when they don't run
+  the installed binaries yet, or `refreshInterval` when the status line runs without it. It lists
+  the changes before applying them. If `settings.json` already runs another status line, it shows
+  that command and replaces it only if you answer yes.
+
+It writes every change at once with `jq`, after copying the file to
+`settings.json.claude_statusline.bak`, and writes through a symlinked `settings.json` rather than
+replacing it. Without `jq`, without a terminal, or when `settings.json` isn't valid JSON, it leaves
+the file alone and prints what to add instead.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CLAUDE_DIR` | `~/.claude` | Install directory |
 | `VERSION` | latest release | Pin to a specific tag, e.g. `v0.9.0` |
-| `NONINTERACTIVE` | unset | `1` skips the questions and lists the optional settings instead, as happens with no terminal |
+| `NONINTERACTIVE` | unset | `1` skips the questions and leaves `settings.json` alone, printing what to add instead, as happens with no terminal |
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
@@ -279,7 +286,7 @@ gh workflow run release.yml --ref master
 
 ## Configure Claude Code
 
-In `~/.claude/settings.json`:
+`install.sh` offers to set this up. To do it by hand, in `~/.claude/settings.json`:
 
 ```json
 {

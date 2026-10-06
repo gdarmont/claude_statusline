@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install a prebuilt claude_statusline release into ~/.claude.
+# Install a prebuilt claude_statusline release into ~/.claude, then offer to set
+# it up in Claude Code's settings.json.
 #
 #   curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh | bash
 #
@@ -84,8 +85,33 @@ done
 
 printf '\nInstalled %s -> %s\n' "$version" "$DEST"
 
-# Optional settings, read from the "env" block of settings.json. Each is offered
-# once: an answer, even a no, is saved, so updates don't ask again.
+# The rest sets up settings.json: the two status line commands, and the optional
+# settings the status line reads from its "env" block. With a terminal and jq, it
+# asks, then makes every change in one write; otherwise it prints what to add.
+
+# Under `curl | bash`, stdin is the script itself, so questions go through the terminal
+interactive=false
+if [ "${NONINTERACTIVE:-}" != 1 ] && (: </dev/tty) 2>/dev/null; then
+  interactive=true
+fi
+
+ask() {
+  local answer
+  printf '%s' "$1" >/dev/tty
+  IFS= read -r answer </dev/tty || answer=""
+  printf '%s' "${answer:-$2}"
+}
+
+# jq can edit settings.json when it holds a JSON object, or when it's missing
+editable=false
+if command -v jq >/dev/null 2>&1; then
+  if [ ! -e "$settings" ] || jq -e 'type == "object"' "$settings" >/dev/null 2>&1; then
+    editable=true
+  else
+    printf 'warning: %s is not a JSON object, so it is left as it is\n' "$settings" >&2
+  fi
+fi
+
 defined() {
   [ -n "${!1+set}" ] && return 0
   if command -v jq >/dev/null 2>&1; then
@@ -95,30 +121,20 @@ defined() {
   fi
 }
 
-# Under `curl | bash`, stdin is the script itself, so questions go through the terminal
-ask() {
-  local answer
-  printf '%s' "$1" >/dev/tty
-  IFS= read -r answer </dev/tty || answer=""
-  printf '%s' "${answer:-$2}"
-}
-
-# Merge a JSON object into the "env" block, keeping a backup. A symlinked
-# settings.json, from a dotfiles manager, is written through rather than replaced.
-save_env() {
+# Apply a jq filter to settings.json, keeping a backup. A symlinked settings.json,
+# from a dotfiles manager, is written through rather than replaced.
+save_settings() {
   local new="$settings.claude_statusline.new"
-  command -v jq >/dev/null 2>&1 || return 1
   mkdir -p "$(dirname "$settings")"
   if [ -f "$settings" ]; then
     # Copied first so the new file keeps its permissions
     cp -p "$settings" "$new"
-    jq --argjson add "$1" '.env = ((.env // {}) + $add)' "$settings" >"$new" 2>/dev/null \
-      || return 1
+    jq "$@" "$settings" >"$new" 2>/dev/null || return 1
     [ -s "$new" ] || return 1
     cp -p "$settings" "$settings.claude_statusline.bak"
     backup=" (previous version: $settings.claude_statusline.bak)"
   else
-    jq -n --argjson add "$1" '{env: $add}' >"$new"
+    printf '{}' | jq "$@" >"$new" || return 1
   fi
   if [ -L "$settings" ]; then
     cat "$new" >"$settings"
@@ -127,13 +143,10 @@ save_env() {
   fi
 }
 
+# Optional settings. Each is offered once: an answer, even a no, is saved, so
+# updates don't ask again.
 answers=()
 unset_settings=()
-backup=""
-interactive=false
-if [ "${NONINTERACTIVE:-}" != 1 ] && (: </dev/tty) 2>/dev/null; then
-  interactive=true
-fi
 
 if ! defined CLAUDE_STATUSLINE_CACHE_NOTIFY; then
   if $interactive; then
@@ -175,32 +188,8 @@ if ! defined CLAUDE_STATUSLINE_UPDATE_CHECK; then
   fi
 fi
 
-if [ ${#answers[@]} -gt 0 ]; then
-  # Keys are fixed and values are validated digits, so nothing needs escaping
-  add="{"
-  for pair in "${answers[@]}"; do
-    add+=$(printf '"%s": "%s", ' "${pair%%=*}" "${pair#*=}")
-  done
-  add="${add%, }}"
-  if save_env "$add"; then
-    printf '\nSaved to %s%s\n' "$settings" "$backup"
-  else
-    printf '\nAdd this to %s, merged into its "env" block if it has one:\n\n  "env": {\n' "$settings"
-    last=$((${#answers[@]} - 1))
-    for i in "${!answers[@]}"; do
-      pair="${answers[$i]}"
-      separator=","
-      [ "$i" -eq "$last" ] && separator=""
-      printf '    "%s": "%s"%s\n' "${pair%%=*}" "${pair#*=}" "$separator"
-    done
-    printf '  }\n'
-  fi
-elif [ ${#unset_settings[@]} -gt 0 ]; then
-  printf '\nOptional settings, for the "env" block of %s:\n' "$settings"
-  printf '  %s\n' "${unset_settings[@]}"
-fi
-
-# On an update, settings.json already points here, in full or as ~/...
+# The status line commands. On an update, settings.json already runs them, in
+# full or as ~/...
 case "$DEST" in
   "$HOME"/*) short="~${DEST#"$HOME"}" ;;
   *)         short="$DEST" ;;
@@ -208,15 +197,138 @@ esac
 configured() {
   grep -qF -e "$DEST/$1\"" -e "$short/$1\"" "$settings" 2>/dev/null
 }
+ours() { [ "$1" = "$DEST/$2" ] || [ "$1" = "$short/$2" ]; }
 
-if configured claude_statusline && configured claude_subagent_statusline; then
-  printf 'Claude Code is already set up for it: the next status line refresh runs %s.\n' "$version"
+# The command settings.json runs for a status line, empty when there is none
+current_command() {
+  [ -f "$settings" ] || return 0
+  jq -r --arg key "$1" \
+    '.[$key] // empty | if type == "object" then .command // "" else . end | tostring' \
+    "$settings"
+}
+
+# One line of the plan: add the block, or replace the command it runs now
+change() {
+  if [ -z "$2" ]; then
+    printf '%-18s  add it, running %s' "$1" "$3"
+  else
+    printf '%-18s  replace %s with %s' "$1" "$2" "$3"
+  fi
+}
+
+status_ok=false
+status_changes=()
+replacing=false
+status_block=null
+sub_block=null
+refresh=false
+if $editable; then
+  status_now=$(current_command statusLine)
+  sub_now=$(current_command subagentStatusLine)
+  if ! ours "$status_now" claude_statusline; then
+    status_block=$(jq -n --arg command "$DEST/claude_statusline" \
+      '{type: "command", command: $command, padding: 0, refreshInterval: 15}')
+    status_changes+=("$(change statusLine "$status_now" "$DEST/claude_statusline")")
+    if [ -n "$status_now" ]; then
+      replacing=true
+    fi
+  elif [ "$(jq '.statusLine | has("refreshInterval")' "$settings")" = false ]; then
+    refresh=true
+    status_changes+=("$(printf '%-18s  add "refreshInterval": 15, so countdowns run while you are idle' statusLine)")
+  fi
+  if ! ours "$sub_now" claude_subagent_statusline; then
+    sub_block=$(jq -n --arg command "$DEST/claude_subagent_statusline" \
+      '{type: "command", command: $command}')
+    status_changes+=("$(change subagentStatusLine "$sub_now" "$DEST/claude_subagent_statusline")")
+    if [ -n "$sub_now" ]; then
+      replacing=true
+    fi
+  fi
+  if [ ${#status_changes[@]} -eq 0 ]; then
+    status_ok=true
+  fi
+elif configured claude_statusline && configured claude_subagent_statusline; then
+  status_ok=true
+fi
+
+# Replacing another status line is opt-in; adding one is the point of installing
+apply_status=false
+if [ ${#status_changes[@]} -gt 0 ] && $interactive; then
+  printf '\nThe status line needs these changes to settings.json:\n' >/dev/tty
+  printf '  %s\n' "${status_changes[@]}" >/dev/tty
+  if $replacing; then
+    prompt='Apply them? [y/N]: '
+    default=n
+  else
+    prompt='Apply them? [Y/n]: '
+    default=y
+  fi
+  while :; do
+    case "$(ask "$prompt" "$default")" in
+      [Yy] | [Yy][Ee][Ss]) apply_status=true; break ;;
+      [Nn] | [Nn][Oo]) break ;;
+    esac
+  done
+fi
+if ! $apply_status; then
+  status_block=null
+  sub_block=null
+  refresh=false
+fi
+
+# Keys are fixed and values are validated digits, so nothing needs escaping
+env_add="{"
+for pair in ${answers[@]+"${answers[@]}"}; do
+  env_add+=$(printf '"%s": "%s", ' "${pair%%=*}" "${pair#*=}")
+done
+env_add="${env_add%, }}"
+
+backup=""
+saved=false
+if $editable && { [ ${#answers[@]} -gt 0 ] || $apply_status; }; then
+  # shellcheck disable=SC2016 # jq variables, not shell ones
+  if save_settings --argjson env "$env_add" --argjson status "$status_block" \
+    --argjson sub "$sub_block" --argjson refresh "$refresh" '
+      (if $env == {} then . else .env = ((.env // {}) + $env) end)
+      | (if $status == null then . else .statusLine = $status end)
+      | (if $sub == null then . else .subagentStatusLine = $sub end)
+      | (if $refresh then .statusLine.refreshInterval = 15 else . end)'; then
+    saved=true
+    printf '\nSaved to %s%s\n' "$settings" "$backup"
+  fi
+fi
+
+if ! $saved && [ ${#answers[@]} -gt 0 ]; then
+  printf '\nAdd this to %s, merged into its "env" block if it has one:\n\n  "env": {\n' "$settings"
+  last=$((${#answers[@]} - 1))
+  for i in "${!answers[@]}"; do
+    pair="${answers[$i]}"
+    separator=","
+    [ "$i" -eq "$last" ] && separator=""
+    printf '    "%s": "%s"%s\n' "${pair%%=*}" "${pair#*=}" "$separator"
+  done
+  printf '  }\n'
+elif [ ${#unset_settings[@]} -gt 0 ]; then
+  printf '\nOptional settings, for the "env" block of %s:\n' "$settings"
+  printf '  %s\n' "${unset_settings[@]}"
+fi
+
+if $status_ok; then
+  printf '\nClaude Code is already set up for it: the next status line refresh runs %s.\n' "$version"
+  exit 0
+fi
+if $saved && $apply_status; then
+  printf 'Restart Claude Code for the status line changes to take effect.\n'
+  exit 0
+fi
+if [ ${#status_changes[@]} -gt 0 ] && $interactive; then
+  printf '\nLeft the status line settings as they were.\n'
   exit 0
 fi
 
 cat <<EOF
 
-Add this to ~/.claude/settings.json, then restart Claude Code:
+Add this to $settings, then restart Claude Code:
 
   "statusLine": {
     "type": "command",
