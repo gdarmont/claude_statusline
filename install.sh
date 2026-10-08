@@ -13,7 +13,7 @@
 # Environment:
 #   CLAUDE_DIR      where to install (default: ~/.claude)
 #   VERSION         release tag to install (default: the latest release)
-#   NONINTERACTIVE  1 to skip the questions about optional settings
+#   NONINTERACTIVE  1 to skip the questions and take the default answers
 #
 # To build from a source checkout instead, use ./dev-install.sh.
 set -euo pipefail
@@ -121,8 +121,9 @@ else
 fi
 
 # The rest sets up settings.json: the two status line commands, and the optional
-# settings the status line reads from its "env" block. With a terminal and jq, it
-# asks, then makes every change in one write; otherwise it prints what to add.
+# settings the status line reads from its "env" block. With jq, it makes every
+# change in one write, after asking when there is a terminal and taking the
+# default answers when there is none. Without jq, it prints what to add.
 
 # Under `curl | bash`, stdin is the script itself, so questions go through the terminal
 interactive=false
@@ -288,7 +289,11 @@ fi
 
 # Replacing another status line is opt-in; adding one is the point of installing
 apply_status=false
-if [ ${#status_changes[@]} -gt 0 ] && $interactive; then
+if [ ${#status_changes[@]} -gt 0 ] && ! $interactive && ! $replacing; then
+  printf '\nThe status line needs these changes to settings.json:\n'
+  printf '  %s\n' "${status_changes[@]}"
+  apply_status=true
+elif [ ${#status_changes[@]} -gt 0 ] && $interactive; then
   printf '\nThe status line needs these changes to settings.json:\n' >/dev/tty
   printf '  %s\n' "${status_changes[@]}" >/dev/tty
   if $replacing; then
@@ -357,12 +362,17 @@ if $status_ok; then
   exit 0
 fi
 if $saved && $apply_status; then
+  # Set apart from the optional settings, listed when there was no one to ask
+  [ ${#unset_settings[@]} -eq 0 ] || echo
   printf 'Restart Claude Code for the status line changes to take effect.\n'
   exit 0
 fi
 if [ ${#status_changes[@]} -gt 0 ] && $interactive; then
   printf '\nLeft the status line settings as they were.\n'
   exit 0
+fi
+if $replacing && ! $apply_status; then
+  printf '\nLeft the status line settings as they were: replacing another status line\ntakes a yes in a terminal.\n'
 fi
 
 cat <<EOF

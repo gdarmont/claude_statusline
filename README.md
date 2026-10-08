@@ -194,7 +194,7 @@ To update, run the same command again. Claude Code switches to the new version o
 line refresh, without a restart. What changed in each version is on the
 [releases page](https://github.com/gdarmont/claude_statusline/releases).
 
-It then sets up `settings.json`, asking first:
+It then sets up `settings.json`, asking first when there is a terminal:
 
 - The two optional features: the [cache expiry notification](#cache-expiry-notification), off by
   default, and the daily [update check](#update-check), on by default. Every answer is saved in the
@@ -205,10 +205,15 @@ It then sets up `settings.json`, asking first:
   the changes before applying them. If `settings.json` already runs another status line, it shows
   that command and replaces it only if you answer yes.
 
+With no terminal, or with `NONINTERACTIVE=1`, it takes the default answers without asking. It adds
+the status line blocks or `refreshInterval`, but never replaces another status line, and it leaves
+the optional features at their defaults without saving an answer, so a later run in a terminal still
+asks about them.
+
 It writes every change at once with `jq`, after copying the file to
 `settings.json.claude_statusline.bak`, and writes through a symlinked `settings.json` rather than
-replacing it. Without `jq`, without a terminal, or when `settings.json` isn't valid JSON, it leaves
-the file alone and prints what to add instead.
+replacing it. Without `jq`, or when `settings.json` isn't valid JSON, it leaves the file alone and
+prints what to add instead.
 
 To run only this setup again, for the binaries already installed, pass `--settings-only`:
 
@@ -221,7 +226,7 @@ curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/i
 |----------|---------|---------|
 | `CLAUDE_DIR` | `~/.claude` | Install directory |
 | `VERSION` | latest release | Pin to a specific tag, e.g. `v0.9.0` |
-| `NONINTERACTIVE` | unset | `1` skips the questions and leaves `settings.json` alone, printing what to add instead, as happens with no terminal |
+| `NONINTERACTIVE` | unset | `1` skips the questions and takes the default answers, as happens with no terminal |
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \

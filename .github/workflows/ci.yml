@@ -54,15 +54,24 @@ jobs:
       - name: Test
         run: cargo test --locked
 
-      # /bin/bash, because that is what `curl | bash` runs: bash 3.2 on macOS
-      - name: Uninstall script
+      # /bin/bash, because that is what `curl | bash` runs: bash 3.2 on macOS.
+      # With no terminal, both scripts go ahead without asking.
+      - name: Install and uninstall scripts
         run: |
           dir=$(mktemp -d)
-          touch "$dir/claude_statusline" "$dir/claude_subagent_statusline" "$dir/claude_statusline.update"
-          printf '{"model": "opus", "statusLine": {"command": "%s/claude_statusline"},
-            "subagentStatusLine": {"command": "~/.claude/claude_subagent_statusline"},
-            "env": {"CLAUDE_STATUSLINE_UPDATE_CHECK": "0"}}' "$dir" >"$dir/settings.json"
-          CLAUDE_DIR="$dir" CLAUDE_CONFIG_DIR="$dir" /bin/bash uninstall.sh
+          export CLAUDE_DIR="$dir" CLAUDE_CONFIG_DIR="$dir"
+          for bin in claude_statusline claude_subagent_statusline; do
+            printf '#!/bin/sh\n' >"$dir/$bin"
+            chmod +x "$dir/$bin"
+          done
+          echo '{"model": "opus", "env": {"CLAUDE_STATUSLINE_UPDATE_CHECK": "0"}}' >"$dir/settings.json"
+          /bin/bash install.sh --settings-only
+          jq -e --arg dir "$dir" '.statusLine.command == "\($dir)/claude_statusline"
+            and .statusLine.refreshInterval == 15
+            and .subagentStatusLine.command == "\($dir)/claude_subagent_statusline"' "$dir/settings.json"
+          jq -e 'has("statusLine") | not' "$dir/settings.json.claude_statusline.bak"
+          touch "$dir/claude_statusline.update"
+          /bin/bash uninstall.sh
           [ "$(jq -c . "$dir/settings.json")" = '{"model":"opus"}' ]
           [ "$(ls "$dir" | tr '\n' ' ')" = 'settings.json settings.json.claude_statusline.bak ' ]
 
