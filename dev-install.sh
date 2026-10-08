@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build both binaries in release mode, back up the installed statusline once,
-# replace it, smoke-test what actually landed in ~/.claude, then offer to set it
+# Build both binaries in release mode, back up the installed ones once,
+# replace them, smoke-test what actually landed in ~/.claude, then offer to set it
 # up in settings.json the way install.sh does.
 set -euo pipefail
 
@@ -10,10 +10,12 @@ DEST="${CLAUDE_DIR:-$HOME/.claude}"
 cargo build --release
 
 # Keep a single pristine backup of whatever was installed before the first run.
-if [ -f "$DEST/claude_statusline" ] && [ ! -f "$DEST/claude_statusline.bak" ]; then
-  cp -p "$DEST/claude_statusline" "$DEST/claude_statusline.bak"
-  echo "backed up previous binary -> $DEST/claude_statusline.bak"
-fi
+for bin in claude_statusline claude_subagent_statusline; do
+  if [ -f "$DEST/$bin" ] && [ ! -f "$DEST/$bin.bak" ]; then
+    cp -p "$DEST/$bin" "$DEST/$bin.bak"
+    echo "backed up previous binary -> $DEST/$bin.bak"
+  fi
+done
 
 # Write next to the target, then rename over it: a status line render that
 # starts mid-update runs the old binary or the new one, never a partial file.

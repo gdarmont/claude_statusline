@@ -185,10 +185,10 @@ curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/i
 ```
 
 Detects your platform, downloads the matching zip from the latest release, verifies it against the
-published `SHA256SUMS`, backs up any existing `claude_statusline` to `claude_statusline.bak` on
-first run, and installs both binaries into `~/.claude/`. Prebuilt binaries cover x86_64 and
-aarch64 Linux (static musl; aarch64 from v1.2.0) and both Apple Silicon and Intel
-macOS; anything else needs a source build.
+published `SHA256SUMS`, backs up the binaries it replaces to `claude_statusline.bak` and
+`claude_subagent_statusline.bak` on first run, and installs both into `~/.claude/`. Prebuilt
+binaries cover x86_64 and aarch64 Linux (static musl; aarch64 from v1.2.0) and both Apple Silicon
+and Intel macOS; anything else needs a source build.
 
 To update, run the same command again. Claude Code switches to the new version on its next status
 line refresh, without a restart. What changed in each version is on the

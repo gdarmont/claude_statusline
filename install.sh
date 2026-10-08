@@ -95,10 +95,12 @@ install_release() {
 
   mkdir -p "$DEST"
   # Keep a single pristine backup of whatever was installed before the first run.
-  if [ -f "$DEST/claude_statusline" ] && [ ! -f "$DEST/claude_statusline.bak" ]; then
-    cp -p "$DEST/claude_statusline" "$DEST/claude_statusline.bak"
-    printf 'Backed up previous binary -> %s/claude_statusline.bak\n' "$DEST"
-  fi
+  for bin in claude_statusline claude_subagent_statusline; do
+    if [ -f "$DEST/$bin" ] && [ ! -f "$DEST/$bin.bak" ]; then
+      cp -p "$DEST/$bin" "$DEST/$bin.bak"
+      printf 'Backed up previous binary -> %s/%s.bak\n' "$DEST" "$bin"
+    fi
+  done
 
   # Write next to the target, then rename over it: a status line render that
   # starts mid-update runs the old binary or the new one, never a partial file.
