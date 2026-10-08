@@ -260,6 +260,28 @@ gh attestation verify ~/.claude/claude_statusline --repo gdarmont/claude_statusl
 `--signer-workflow` accepts only signatures made by `release.yml`, not by other workflows in the
 repository.
 
+## Uninstall
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/uninstall.sh | bash
+```
+
+Removes both binaries from `~/.claude/` with their `.bak` backups, the
+[update check](#update-check)'s cache and the [cache notification](#cache-expiry-notification)'s
+markers. From `settings.json`, it removes the `statusLine` and `subagentStatusLine` blocks when
+they run `claude_statusline`, from `~/.claude/` or a source build, and every `CLAUDE_STATUSLINE_*`
+entry in the `env` block. A status line that runs another command is left alone.
+
+It lists all of it and asks before removing anything. It edits `settings.json` the way `install.sh`
+does, with `jq`, after copying it to `settings.json.claude_statusline.bak`. Without `jq`, or when
+`settings.json` isn't valid JSON, it removes the files and prints what to delete from
+`settings.json` by hand. Restart Claude Code afterwards.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDE_DIR` | `~/.claude` | Install directory, as given to `install.sh` |
+| `NONINTERACTIVE` | unset | `1` removes everything without asking, as happens with no terminal |
+
 ## Releasing
 
 Releases are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) when a `v*`

@@ -23,7 +23,7 @@ cargo +1.88 test                            # the declared rust-version
 ./dev-install.sh                            # build, install to ~/.claude/, smoke-test, set up settings.json
 ```
 
-`.github/workflows/ci.yml` runs fmt, clippy, shellcheck on the install scripts, tests on Linux and macOS, and a test on the `rust-version` from `Cargo.toml`. Bump `rust-version` when using a newer language feature.
+`.github/workflows/ci.yml` runs fmt, clippy, shellcheck on the install scripts, tests on Linux and macOS (with a run of `uninstall.sh` under `/bin/bash`), and a test on the `rust-version` from `Cargo.toml`. Bump `rust-version` when using a newer language feature.
 
 ## Conventions
 
