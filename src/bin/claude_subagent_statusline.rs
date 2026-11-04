@@ -9,7 +9,7 @@ mod lenient;
 mod render;
 
 use render::{
-    BLUE, GREEN, RED, Rgb, SLATE, WHITE, YELLOW, fg_styled, fmt_duration_secs, fmt_tokens,
+    BLUE, GREEN, ORANGE, RED, Rgb, SLATE, WHITE, YELLOW, fg_styled, fmt_duration_secs, fmt_tokens,
     truncate, unix_now, usage_colors,
 };
 use serde::Deserialize;
@@ -20,6 +20,10 @@ const DIM: Rgb = Rgb(120, 124, 138);
 const SEPARATOR: &str = " \u{b7} ";
 /// Below this the detail column is dropped rather than truncated to noise.
 const MIN_DETAIL_WIDTH: usize = 8;
+/// Below this the title is truncated to noise, so the agent type gives way first.
+const MIN_TITLE_WIDTH: usize = 8;
+/// The type Claude Code gives a subagent spawned without one, which says nothing about it.
+const DEFAULT_AGENT_TYPE: &str = "general-purpose";
 const SPARK_BARS: [char; 8] = [
     '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}',
 ];
@@ -42,6 +46,9 @@ struct Task {
     id: String,
     #[serde(default, deserialize_with = "lenient::option")]
     name: Option<String>,
+    /// Subagent type, such as `Explore` or a custom agent's name (Claude Code v2.1.318+).
+    #[serde(default, deserialize_with = "lenient::option")]
+    agent_type: Option<String>,
     #[serde(default, deserialize_with = "lenient::option")]
     status: Option<String>,
     #[serde(default, deserialize_with = "lenient::option")]
@@ -156,16 +163,31 @@ fn insert_if_fits(
 fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
     let (marker, marker_color) = status_marker(task.status.as_deref());
 
+    let mut agent_type = task
+        .agent_type
+        .as_ref()
+        .filter(|kind| !kind.is_empty() && *kind != DEFAULT_AGENT_TYPE);
+
     // Claude Code names only the subagents spawned with a name, so most are told
-    // apart by the description of their task
-    let title = [&task.name, &task.description]
+    // apart by the description of their task, and the type titles a row with neither
+    let title = match [&task.name, &task.description]
         .into_iter()
         .flatten()
         .find(|text| !text.is_empty())
-        .map_or("task", String::as_str);
+    {
+        Some(title) => title.as_str(),
+        None => agent_type.take().map_or("task", String::as_str),
+    };
+    let agent_type = agent_type.filter(|kind| *kind != title);
 
-    // Fixed columns, in display order
-    let mut parts: Vec<(String, Rgb)> = vec![(title.to_string(), WHITE)];
+    // Fixed columns, in display order. The type leads, as in the transcript's
+    // `Explore(Search the repo)`.
+    let mut parts: Vec<(String, Rgb)> = Vec::new();
+    if let Some(kind) = agent_type {
+        parts.push((kind.clone(), ORANGE));
+    }
+    let mut title_index = parts.len();
+    parts.push((title.to_string(), WHITE));
 
     let mut model_text = task.model.as_deref().map(short_model).unwrap_or_default();
     if let Some(effort) = &task.effort {
@@ -191,11 +213,20 @@ fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
         parts.push((text, color));
     }
 
-    // A long title gives way before the model and context do
+    // A long title gives way before the model and context do, and the type before
+    // the title is cut below a readable width
     if let Some(columns) = columns {
-        let overflow = row_width(marker, &parts).saturating_sub(columns);
+        let mut overflow = row_width(marker, &parts).saturating_sub(columns);
+        if title_index > 0
+            && overflow > 0
+            && title.width().saturating_sub(overflow) < MIN_TITLE_WIDTH
+        {
+            parts.remove(0);
+            title_index = 0;
+            overflow = row_width(marker, &parts).saturating_sub(columns);
+        }
         if overflow > 0 {
-            parts[0].0 = truncate(title, title.width().saturating_sub(overflow));
+            parts[title_index].0 = truncate(title, title.width().saturating_sub(overflow));
         }
     }
 
@@ -235,7 +266,7 @@ fn render_row(task: &Task, columns: Option<usize>, now: u64) -> String {
 
         if budget >= MIN_DETAIL_WIDTH {
             // Detail sits right after the name
-            parts.insert(1, (truncate(&detail, budget), DIM));
+            parts.insert(title_index + 1, (truncate(&detail, budget), DIM));
         }
     }
 
@@ -354,6 +385,77 @@ mod tests {
         );
         let untitled = row(json!({ "description": "", "label": null }));
         assert!(untitled.starts_with("\u{25cf} task \u{b7}"), "{untitled}");
+    }
+
+    /// An unnamed `Explore` subagent, as Claude Code v2.1.318+ sends it.
+    fn typed(fields: &serde_json::Value) -> serde_json::Value {
+        let mut task = explore();
+        let object = task.as_object_mut().expect("task is an object");
+        object.remove("name");
+        object.insert("agentType".into(), json!("Explore"));
+        object.insert("description".into(), json!("Search the repo"));
+        object.extend(fields.as_object().expect("fields are an object").clone());
+        task
+    }
+
+    fn typed_row(fields: &serde_json::Value, columns: Option<usize>) -> String {
+        let input = parse(&json!({ "tasks": [typed(fields)] }));
+        strip_ansi(&render_row(&input.tasks[0], columns, NOW))
+    }
+
+    #[test]
+    fn the_agent_type_leads_the_row() {
+        assert_eq!(
+            typed_row(&json!({}), None),
+            "\u{25cf} Explore \u{b7} Search the repo \u{b7} scanning src/ \u{b7} opus-5 high \u{b7} 12k/200k 6% \u{b7} \u{2581}\u{2585}\u{2588}\u{2581}\u{2582} \u{b7} 2m14s"
+        );
+        let named = typed_row(
+            &json!({ "agentType": "security-reviewer", "name": "reviewer-1" }),
+            None,
+        );
+        assert!(
+            named.starts_with("\u{25cf} security-reviewer \u{b7} reviewer-1 \u{b7} scanning src/"),
+            "{named}"
+        );
+    }
+
+    #[test]
+    fn the_agent_type_is_hidden_when_it_says_nothing_new() {
+        let row = |fields: serde_json::Value| typed_row(&fields, None);
+        let starts = |row: &str, start: &str| assert!(row.starts_with(start), "{row}");
+
+        // The default type, given to every subagent spawned without one
+        let default = row(json!({ "agentType": "general-purpose" }));
+        starts(&default, "\u{25cf} Search the repo \u{b7} scanning src/");
+        // Already the name
+        let same = row(json!({ "name": "Explore" }));
+        starts(&same, "\u{25cf} Explore \u{b7} scanning src/");
+        for missing in [json!(""), json!(null), json!(42)] {
+            let row = row(json!({ "agentType": missing }));
+            starts(&row, "\u{25cf} Search the repo \u{b7} scanning src/");
+        }
+        // With no name or description, the type titles the row once
+        let untitled = row(json!({ "description": null, "label": null }));
+        starts(&untitled, "\u{25cf} Explore \u{b7} opus-5 high");
+    }
+
+    #[test]
+    fn the_agent_type_gives_way_before_the_title_is_cut_short() {
+        let audit = json!({ "description": "Audit every dependency for known vulnerabilities" });
+
+        let row = typed_row(&audit, Some(60));
+        assert_eq!(
+            row,
+            "\u{25cf} Explore \u{b7} Audit every depende\u{2026} \u{b7} opus-5 high \u{b7} 12k/200k 6%"
+        );
+        assert_eq!(row.width(), 60);
+
+        let row = typed_row(&audit, Some(40));
+        assert_eq!(
+            row,
+            "\u{25cf} Audit eve\u{2026} \u{b7} opus-5 high \u{b7} 12k/200k 6%"
+        );
+        assert_eq!(row.width(), 40);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-# Payloads Claude Code sends the status line commands, last checked against 2.1.291.
+# Payloads Claude Code sends the status line commands, last checked against 2.1.318.
 # Written by docs/check_schema.py --update; run it without to see what changed.
 
 ## statusLine: schema from the statusline-setup agent prompt
@@ -47,7 +47,7 @@
     "enabled": boolean         // Whether extended thinking is enabled for this session
   },
   "rate_limits": {             // Optional: Claude.ai subscription usage limits, or a Claude gateway spend limit. Only present for subscribers, or behind a gateway that sets a spend limit for you, after first API response, while at least one window is present.
-    "five_hour": {             // Optional: 5-hour session limit (present only while the API reports it and its resets_at has not passed)
+    "five_hour": {             // Optional: 5-hour limit (present only while the API reports it and its resets_at has not passed)
       "used_percentage": number,   // Percentage of limit used (0-100)
       "resets_at": number          // Unix epoch seconds when this window resets
     },
@@ -114,6 +114,7 @@
     id: task.id
     name: _.get(task.id)
     type: task.type
+    agentType: task.agentType
     status: task.status
     description: task.description
     label: _(task)||task.description

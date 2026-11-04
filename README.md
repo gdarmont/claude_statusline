@@ -56,8 +56,8 @@ Threshold colors for context and rate limits:
 prompt:
 
 ```
-● Explore · scanning src/ · opus-5 high · 12k/200k 6% · ▁▄▆▁▂▆█▂ · 2m14s
-✓ security-reviewer · review install.sh · sonnet-5-5 medium · 48k/200k 24%
+● Explore · Search the repo · scanning src/ · opus-5 high · 12k/200k 6% · ▁▄▆▁▂▆█▂ · 2m14s
+✓ security-reviewer · Review install.sh · sonnet-5-5 medium · 48k/200k 24%
 ```
 
 Each table entry is one column of the first row, listed left to right. Columns are separated by
@@ -66,7 +66,8 @@ Each table entry is one column of the first row, listed left to right. Columns a
 | Column | Example | Color | Description |
 |--------|---------|-------|-------------|
 | Status | `●` | State-colored | Green `●` running, yellow `○` pending, blue `✓` completed, red `✗` failed or killed, slate `●` anything else, such as paused |
-| Name | `Explore` | White | Name the subagent was spawned with. Most subagents have none and show their task description instead, such as `Search the repo` |
+| Type | `Explore` | Orange | Subagent type: a built-in such as `Explore` or `Plan`, or a custom agent's name. Hidden for `general-purpose`, the type of a subagent spawned without one, and when the name already says it |
+| Name | `Search the repo` | White | Name the subagent was spawned with. Most subagents have none and show their task description instead, or their type when they have no description either |
 | Detail | `scanning src/` | Dim | What the subagent is doing now, or its task description when the name doesn't already show it. Truncated with `…` to the room left, and dropped when less than 8 cells remain |
 | Model | `opus-5 high` | Dim | Model ID without the `claude-` prefix and date suffix, then the effort set for that subagent: a level, or a token budget such as `16k` |
 | Context | `12k/200k 6%` | Green / Yellow / Red | Tokens in the subagent's context out of its model's window, and the share used, with the same thresholds as the main context. Only the token count, dimmed, when the window size is unknown. Hidden until the subagent reports tokens |
@@ -74,9 +75,9 @@ Each table entry is one column of the first row, listed left to right. Columns a
 | Running time | `2m14s` | Dim | **Running only.** How long the subagent has been running. A finished subagent doesn't report when it ended, so it gets neither this column nor the activity |
 
 A row never wraps. Claude Code reports the width left for the row body, and the name, model and
-context always show, the name truncated if they wouldn't fit otherwise. Running time, then
-activity, are added only if they fit while leaving 8 cells for the detail, which then fills
-whatever is left.
+context always show, the name truncated if they wouldn't fit otherwise. The type shows too, unless
+the name would be cut below 8 cells to make room for it. Running time, then activity, are added
+only if they fit while leaving 8 cells for the detail, which then fills whatever is left.
 
 ### Right alignment
 
@@ -352,7 +353,7 @@ is what the activity sparkline measures.
 
 ## Input format
 
-Both schemas below were last checked against Claude Code **v2.1.291**. Newer releases add fields
+Both schemas below were last checked against Claude Code **v2.1.318**. Newer releases add fields
 the renderer ignores, and a field whose type changes hides its section instead of breaking the line.
 
 To see what a newer Claude Code changed, run `python3 docs/check_schema.py`. It reads both payloads
@@ -432,7 +433,7 @@ Every field is optional except `id`:
   "columns": 80,
   "tasks": [
     {
-      "id": "t1", "name": "Explore", "type": "local_agent", "status": "running",
+      "id": "t1", "type": "local_agent", "agentType": "Explore", "status": "running",
       "label": "scanning src/", "description": "Search the repo",
       "model": "claude-opus-5", "effort": "high", "contextWindowSize": 200000,
       "tokenCount": 12500, "startTime": 1738425466000,
@@ -451,6 +452,9 @@ Notes on availability:
 - `columns` is the width left for the row body once Claude Code has drawn its own indent
 - `name` is set only for a subagent given a name when it was spawned, so that other agents can
   message it. The others are titled by their `description`
+- `agentType` is the subagent type: a built-in such as `Explore` or `Plan`, a custom agent's name,
+  `general-purpose` when none was chosen, or `main-session` for a backgrounded main session. It is
+  set only on `local_agent` tasks. v2.1.318 sends it; v2.1.314 doesn't
 - `status` is `pending`, `running`, `completed`, `failed`, `killed` or `paused`
 - `label` is what the subagent reports doing now, and falls back to `description`
 - `tokenCount` is `0` until the subagent reports progress. `tokenSamples` holds its value at each of

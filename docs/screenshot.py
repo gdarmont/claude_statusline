@@ -41,11 +41,13 @@ session = {
     "worktree": {"name": "my-feature", "original_branch": "master"},
 }
 tasks = {"columns": columns, "tasks": [
-    {"id": "t1", "name": "Explore", "status": "running", "label": "scanning src/",
+    {"id": "t1", "agentType": "Explore", "description": "Search the repo",
+     "status": "running", "label": "scanning src/",
      "model": "claude-opus-5", "effort": "high", "contextWindowSize": 200000,
      "tokenCount": 12500, "startTime": (now - 134) * 1000,
      "tokenSamples": [0, 0, 500, 1500, 1500, 1600, 2600, 4100, 4300]},
-    {"id": "t2", "name": "security-reviewer", "status": "completed", "label": "review install.sh",
+    {"id": "t2", "agentType": "security-reviewer", "description": "Review install.sh",
+     "status": "completed", "label": "Review install.sh",
      "model": "claude-sonnet-5-5", "effort": "medium", "contextWindowSize": 200000,
      "tokenCount": 48200},
 ]}
