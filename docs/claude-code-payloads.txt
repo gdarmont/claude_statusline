@@ -1,4 +1,4 @@
-# Payload Claude Code sends the status line command, last checked against 2.1.318.
+# Payload Claude Code sends the status line command, last checked against 2.1.326.
 # Written by docs/check_schema.py --update; run it without to see what changed.
 
 ## statusLine: schema from the statusline-setup agent prompt
