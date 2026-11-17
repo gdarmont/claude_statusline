@@ -2,7 +2,7 @@
 
 A powerline-style statusline renderer for [Claude Code](https://code.claude.com/docs/en/statusline). It reads session data as JSON from stdin and outputs ANSI-colored, powerline-styled text.
 
-![Both status line rows, right-aligned, above two subagent rows in the agent panel](docs/statusline.png)
+![Both status line rows, with the right-hand groups pinned to the right edge](docs/statusline.png)
 
 ```
  claude_statusline   master  ⧉ my-feature ← master  PR #1234 approved            session-name
@@ -12,8 +12,6 @@ A powerline-style statusline renderer for [Claude Code](https://code.claude.com/
 The output is two rows: the first says *where* you are working, the second says *how* the session is going. Every section is hidden when its data is absent, so a fresh session in a plain directory renders just the directory and the model.
 
 Each row is split into a left group and a right group pinned to the right edge, so spend and rate limits keep a fixed screen position instead of drifting as the left side grows.
-
-A second binary, `claude_subagent_statusline`, draws the rows of the agent panel below the prompt (the bottom two rows of the screenshot): one per subagent, with its model, context use, recent activity and running time. See [Agent panel](#agent-panel).
 
 ## Sections
 
@@ -49,35 +47,6 @@ Threshold colors for context and rate limits:
 - **Green** -- 0-59%
 - **Yellow** -- 60-80%
 - **Red** -- above 80%
-
-### Agent panel
-
-`claude_subagent_statusline` replaces the body of each subagent row in the agent panel below the
-prompt:
-
-```
-● Explore · Search the repo · scanning src/ · opus-5 high · 12k/200k 6% · ▁▄▆▁▂▆█▂ · 2m14s
-✓ security-reviewer · Review install.sh · sonnet-5-5 medium · 48k/200k 24%
-```
-
-Each table entry is one column of the first row, listed left to right. Columns are separated by
-`·` and hidden when their data is absent.
-
-| Column | Example | Color | Description |
-|--------|---------|-------|-------------|
-| Status | `●` | State-colored | Green `●` running, yellow `○` pending, blue `✓` completed, red `✗` failed or killed, slate `●` anything else, such as paused |
-| Type | `Explore` | Orange | Subagent type: a built-in such as `Explore` or `Plan`, or a custom agent's name. Hidden for `general-purpose`, the type of a subagent spawned without one, and when the name already says it |
-| Name | `Search the repo` | White | Name the subagent was spawned with. Most subagents have none and show their task description instead, or their type when they have no description either |
-| Detail | `scanning src/` | Dim | What the subagent is doing now, or its task description when the name doesn't already show it. Truncated with `…` to the room left, and dropped when less than 8 cells remain |
-| Model | `opus-5 high` | Dim | Model ID without the `claude-` prefix and date suffix, then the effort set for that subagent: a level, or a token budget such as `16k` |
-| Context | `12k/200k 6%` | Green / Yellow / Red | Tokens in the subagent's context out of its model's window, and the share used, with the same thresholds as the main context. Only the token count, dimmed, when the window size is unknown. Hidden until the subagent reports tokens |
-| Activity | `▁▄▆▁▂▆█▂` | Dim | **Running only.** Tokens gained in each of the last eight refresh intervals (about five seconds each), scaled to the busiest one. A flat `▁▁▁` is a subagent that has stopped producing tokens, for example while a long tool call runs |
-| Running time | `2m14s` | Dim | **Running only.** How long the subagent has been running. A finished subagent doesn't report when it ended, so it gets neither this column nor the activity |
-
-A row never wraps. Claude Code reports the width left for the row body, and the name, model and
-context always show, the name truncated if they wouldn't fit otherwise. The type shows too, unless
-the name would be cut below 8 cells to make room for it. Running time, then activity, are added
-only if they fit while leaving 8 cells for the detail, which then fills whatever is left.
 
 ### Right alignment
 
@@ -174,10 +143,7 @@ directory) and the tokens the next message re-caches once the cache is cold. It 
 cargo build --release
 ```
 
-Two binaries are produced in `target/release/`:
-
-- `claude_statusline` -- the main status line
-- `claude_subagent_statusline` -- one row per subagent in the agent panel
+The binary is `target/release/claude_statusline`.
 
 ## Install or update
 
@@ -186,10 +152,9 @@ curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/i
 ```
 
 Detects your platform, downloads the matching zip from the latest release, verifies it against the
-published `SHA256SUMS`, backs up the binaries it replaces to `claude_statusline.bak` and
-`claude_subagent_statusline.bak` on first run, and installs both into `~/.claude/`. Prebuilt
-binaries cover x86_64 and aarch64 Linux (static musl; aarch64 from v1.2.0) and both Apple Silicon
-and Intel macOS; anything else needs a source build.
+published `SHA256SUMS`, backs up the binary it replaces to `claude_statusline.bak` on first run, and
+installs it into `~/.claude/`. Prebuilt binaries cover x86_64 and aarch64 Linux (static musl;
+aarch64 from v1.2.0) and both Apple Silicon and Intel macOS; anything else needs a source build.
 
 To update, run the same command again. Claude Code switches to the new version on its next status
 line refresh, without a restart. What changed in each version is on the
@@ -201,22 +166,27 @@ It then sets up `settings.json`, asking first when there is a terminal:
   default, and the daily [update check](#update-check), on by default. Every answer is saved in the
   `env` block, a no included, so updates don't ask again. A setting already in `settings.json` or in
   the environment is never asked about.
-- The [`statusLine` and `subagentStatusLine` blocks](#configure-claude-code), when they don't run
-  the installed binaries yet, or `refreshInterval` when the status line runs without it. It lists
-  the changes before applying them. If `settings.json` already runs another status line, it shows
-  that command and replaces it only if you answer yes.
+- The [`statusLine` block](#configure-claude-code), when it doesn't run the installed binary yet,
+  or `refreshInterval` when the status line runs without it. It also removes a `subagentStatusLine`
+  block that runs `claude_subagent_statusline`. It lists the changes before applying them. If
+  `settings.json` already runs another status line, it shows that command and replaces it only if
+  you answer yes.
 
-With no terminal, or with `NONINTERACTIVE=1`, it takes the default answers without asking. It adds
-the status line blocks or `refreshInterval`, but never replaces another status line, and it leaves
-the optional features at their defaults without saving an answer, so a later run in a terminal still
-asks about them.
+With no terminal, or with `NONINTERACTIVE=1`, it takes the default answers without asking. It
+applies the status line changes, unless one of them would replace another status line: then it
+applies none and prints them instead. It leaves the optional features at their defaults without
+saving an answer, so a later run in a terminal still asks about them.
 
 It writes every change at once with `jq`, after copying the file to
 `settings.json.claude_statusline.bak`, and writes through a symlinked `settings.json` rather than
 replacing it. Without `jq`, or when `settings.json` isn't valid JSON, it leaves the file alone and
-prints what to add instead.
+prints what to change instead.
 
-To run only this setup again, for the binaries already installed, pass `--settings-only`:
+Releases up to v1.5.0 also installed `claude_subagent_statusline`, for Claude Code's
+`subagentStatusLine` setting, which Claude Code v2.1.323 removed. An update deletes that binary and
+its `.bak` backup, and removes its block from `settings.json` along with the other changes.
+
+To run only this setup again, for the binary already installed, pass `--settings-only`:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
@@ -240,12 +210,13 @@ curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/i
 ./dev-install.sh
 ```
 
-Builds both binaries in release mode, installs them the same way, smoke-tests what landed, and
-then runs `./install.sh --settings-only` to set up `settings.json`. Or by hand:
+Builds the binary in release mode, installs it the same way, deletes the
+`claude_subagent_statusline` of an older release, smoke-tests what landed, and then runs
+`./install.sh --settings-only` to set up `settings.json`. Or by hand:
 
 ```sh
 cargo build --release
-cp target/release/claude_statusline target/release/claude_subagent_statusline ~/.claude/
+cp target/release/claude_statusline ~/.claude/
 ```
 
 To check what's installed:
@@ -254,7 +225,7 @@ To check what's installed:
 ~/.claude/claude_statusline --version
 ```
 
-Release zips and the binaries in them carry a signed build provenance attestation (v1.2.0 and
+Release zips and the binary in each carry a signed build provenance attestation (v1.2.0 and
 later). To confirm a binary was built by this repository's release workflow, with the
 [GitHub CLI](https://cli.github.com/) logged in:
 
@@ -272,11 +243,13 @@ repository.
 curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/uninstall.sh | bash
 ```
 
-Removes both binaries from `~/.claude/` with their `.bak` backups, the
-[update check](#update-check)'s cache and the [cache notification](#cache-expiry-notification)'s
-markers. From `settings.json`, it removes the `statusLine` and `subagentStatusLine` blocks when
-they run `claude_statusline`, from `~/.claude/` or a source build, and every `CLAUDE_STATUSLINE_*`
-entry in the `env` block. A status line that runs another command is left alone.
+Removes the binary from `~/.claude/` with its `.bak` backup, the [update check](#update-check)'s
+cache and the [cache notification](#cache-expiry-notification)'s markers, and the
+`claude_subagent_statusline` binary that releases up to v1.5.0 installed. From `settings.json`, it
+removes the `statusLine` block when it runs `claude_statusline`, from `~/.claude/` or a source
+build, the `subagentStatusLine` block when it runs `claude_subagent_statusline`, and every
+`CLAUDE_STATUSLINE_*` entry in the `env` block. A status line that runs another command is left
+alone.
 
 It lists all of it and asks before removing anything. It edits `settings.json` the way `install.sh`
 does, with `jq`, after copying it to `settings.json.claude_statusline.bak`. Without `jq`, or when
@@ -302,7 +275,8 @@ git push origin master --follow-tags
 ```
 
 The workflow runs the full CI suite first and builds nothing unless it passes. Each platform job
-then zips both binaries together, and the release job publishes every zip plus a `SHA256SUMS` file.
+then zips the binary with the license, and the release job publishes every zip plus a `SHA256SUMS`
+file.
 The release notes list the commit subjects since the previous tag, leaving out the `Release vX`
 commits, so write subjects that read as changelog entries. Once the release is out, an install job
 runs `install.sh` on x86_64 and arm64 Linux and on Apple Silicon macOS, the way users do, and checks
@@ -330,10 +304,6 @@ gh workflow run release.yml --ref master
     "command": "~/.claude/claude_statusline",
     "padding": 0,
     "refreshInterval": 15
-  },
-  "subagentStatusLine": {
-    "type": "command",
-    "command": "~/.claude/claude_subagent_statusline"
   }
 }
 ```
@@ -347,18 +317,14 @@ left at your last message until it turns cold, and never turns yellow or
 [notifies you](#cache-expiry-notification) as it nears expiry, which is exactly when you'd want to
 know. The binary finishes in a few milliseconds, so the cost is negligible.
 
-`subagentStatusLine` takes no `refreshInterval`. Claude Code runs it shortly after a subagent
-appears in the agent panel or leaves it, then every five seconds while any is shown, and that tick
-is what the activity sparkline measures.
-
 ## Input format
 
-Both schemas below were last checked against Claude Code **v2.1.318**. Newer releases add fields
-the renderer ignores, and a field whose type changes hides its section instead of breaking the line.
+The schema below was last checked against Claude Code **v2.1.318**. Newer releases add fields the
+renderer ignores, and a field whose type changes hides its section instead of breaking the line.
 
-To see what a newer Claude Code changed, run `python3 docs/check_schema.py`. It reads both payloads
-from the installed `claude` binary and diffs them against
-[`docs/claude-code-payloads.txt`](docs/claude-code-payloads.txt), the full schemas as last checked.
+To see what a newer Claude Code changed, run `python3 docs/check_schema.py`. It reads the schema
+from the installed `claude` binary and diffs it against
+[`docs/claude-code-payloads.txt`](docs/claude-code-payloads.txt), the full schema as last checked.
 Once the renderer and this README handle the changes, `--update` records the new version in both.
 
 Claude Code pipes a JSON object to stdin on every refresh. Every field below is optional except `workspace.current_dir` and `model.display_name`:
@@ -420,78 +386,28 @@ Notes on availability:
 - `effort` appears only on models supporting the reasoning effort parameter
 - `context_window.current_usage` is `null` before the first API call and after `/compact`
 
-### Subagent rows
-
-`claude_subagent_statusline` receives every visible subagent row at once and writes one
-`{"id": ..., "content": ...}` line per row (see [Agent panel](#agent-panel) for what it draws).
-Every field is optional except `id`:
-
-```json
-{
-  "session_id": "4b1c6f0e-8d2a-4f5b-9c3e-7a1d2e3f4a5b",
-  "cwd": "/home/user/projects/myproject",
-  "columns": 80,
-  "tasks": [
-    {
-      "id": "t1", "type": "local_agent", "agentType": "Explore", "status": "running",
-      "label": "scanning src/", "description": "Search the repo",
-      "model": "claude-opus-5", "effort": "high", "contextWindowSize": 200000,
-      "tokenCount": 12500, "startTime": 1738425466000,
-      "tokenSamples": [0, 0, 500, 1500, 1500, 1600],
-      "cwd": "/home/user/projects/myproject"
-    }
-  ]
-}
-```
-
-Notes on availability:
-
-- The payload also carries the [common hook fields](https://code.claude.com/docs/en/hooks#common-input-fields)
-  such as `session_id` and `transcript_path`. The renderer ignores them, along with `type` and each
-  task's `cwd`
-- `columns` is the width left for the row body once Claude Code has drawn its own indent
-- `name` is set only for a subagent given a name when it was spawned, so that other agents can
-  message it. The others are titled by their `description`
-- `agentType` is the subagent type: a built-in such as `Explore` or `Plan`, a custom agent's name,
-  `general-purpose` when none was chosen, or `main-session` for a backgrounded main session. It is
-  set only on `local_agent` tasks. v2.1.318 sends it; v2.1.314 doesn't
-- `status` is `pending`, `running`, `completed`, `failed`, `killed` or `paused`
-- `label` is what the subagent reports doing now, and falls back to `description`
-- `tokenCount` is `0` until the subagent reports progress. `tokenSamples` holds its value at each of
-  the last 16 refresh ticks, oldest first. `startTime` is in Unix milliseconds
-- `model` and `contextWindowSize` need v2.1.205+, and are absent until the subagent's model is
-  resolved. `effort` needs v2.1.214+, and is absent when the subagent inherits the session's effort
-
-A task missing from the output keeps Claude Code's default row (`name · description · token
-count`), and so does every task when the command fails or takes more than five seconds.
-
 ## Testing
 
 ```sh
 cargo test
 ```
 
-Unit tests sit next to the code in each binary. `tests/cli.rs` runs the built binaries end to
-end, JSON on stdin, the way Claude Code does. CI runs formatting, clippy with warnings as errors,
+Unit tests sit next to the code. `tests/cli.rs` runs the built binary end to end, JSON on stdin,
+the way Claude Code does. CI runs formatting, clippy with warnings as errors,
 and the tests on Linux and macOS, plus a build on the `rust-version` from `Cargo.toml`.
 
 A field whose type changes in a new Claude Code release is treated as absent, so only its section
 disappears. If the whole line shows `[statusline]` instead, the payload itself couldn't be parsed;
-the reason is on stderr, which `claude --debug` logs. The subagent binary prints nothing in that
-case, so the agent panel falls back to Claude Code's default rows, and a single task it can't
-parse keeps its default row while the others still render.
+the reason is on stderr, which `claude --debug` logs.
 
 To try a payload by hand:
 
 ```sh
 echo '{"workspace":{"current_dir":"/tmp/demo"},"model":{"display_name":"Opus"}}' \
   | ./target/release/claude_statusline
-
-echo '{"columns":80,"tasks":[{"id":"t1","name":"Explore","status":"running","tokenCount":12500,"contextWindowSize":200000}]}' \
-  | ./target/release/claude_subagent_statusline
 ```
 
-The screenshot at the top comes from the release binaries too. After a visual change, regenerate it
+The screenshot at the top comes from the release binary too. After a visual change, regenerate it
 with `python3 docs/screenshot.py` (needs `cargo build --release`, the MesloLGS NF font, and Chrome
 or Chromium).
 

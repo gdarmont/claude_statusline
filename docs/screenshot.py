@@ -1,6 +1,6 @@
 """Regenerate docs/statusline.png, the README screenshot, from real output.
 
-Feeds sample session JSON to the release binaries, turns their ANSI colors into
+Feeds sample session JSON to the release binary, turns its ANSI colors into
 HTML set in MesloLGS NF, and screenshots it with headless Chrome. Needs
 `cargo build --release` first, the MesloLGS NF font, and Chrome or Chromium
 (or $CHROME pointing at one).
@@ -40,24 +40,9 @@ session = {
     "pr": {"number": 1234, "url": "https://github.com/o/r/pull/1234", "review_state": "approved"},
     "worktree": {"name": "my-feature", "original_branch": "master"},
 }
-tasks = {"columns": columns, "tasks": [
-    {"id": "t1", "agentType": "Explore", "description": "Search the repo",
-     "status": "running", "label": "scanning src/",
-     "model": "claude-opus-5", "effort": "high", "contextWindowSize": 200000,
-     "tokenCount": 12500, "startTime": (now - 134) * 1000,
-     "tokenSamples": [0, 0, 500, 1500, 1500, 1600, 2600, 4100, 4300]},
-    {"id": "t2", "agentType": "security-reviewer", "description": "Review install.sh",
-     "status": "completed", "label": "Review install.sh",
-     "model": "claude-sonnet-5-5", "effort": "medium", "contextWindowSize": 200000,
-     "tokenCount": 48200},
-]}
-
 env = dict(os.environ, COLUMNS=str(columns), CLAUDE_STATUSLINE_UPDATE_CHECK="0")
 rows = subprocess.run([f"{bin_dir}/claude_statusline"], input=json.dumps(session),
                       capture_output=True, text=True, env=env, check=True).stdout.splitlines()
-out = subprocess.run([f"{bin_dir}/claude_subagent_statusline"], input=json.dumps(tasks),
-                     capture_output=True, text=True, env=env, check=True).stdout
-agent_rows = [json.loads(line)["content"] for line in out.splitlines()]
 
 OSC8 = re.compile(r"\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)")
 SGR = re.compile(r"\x1b\[([0-9;]*)m")
@@ -101,10 +86,8 @@ page = f"""<!doctype html><meta charset="utf-8">
   body {{ margin: 0; background: #1b1d23; }}
   .term {{ padding: 18px 22px; font: 15px/1.45 'MesloLGS NF', monospace; color: #d6d8de;
           white-space: pre; display: inline-block; }}
-  .gap {{ height: 14px; }}
-  .dim {{ color: #6b7080; }}
 </style>
-<div class="term">{"<br>".join(to_html(r) for r in rows)}<div class="gap"></div><span class="dim">agents</span><br>{"<br>".join(to_html(r) for r in agent_rows)}</div>
+<div class="term">{"<br>".join(to_html(r) for r in rows)}</div>
 """
 
 chrome = os.environ.get("CHROME") or next(
@@ -115,6 +98,6 @@ page_path = pathlib.Path(scratch.name) / "statusline.html"
 page_path.write_text(page)
 # Wide enough for the right-aligned groups at these columns, tall enough for the rows
 subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-                "--force-device-scale-factor=2", "--window-size=1490,172",
+                "--force-device-scale-factor=2", "--window-size=1490,80",
                 f"--screenshot={repo / 'docs' / 'statusline.png'}", page_path.as_uri()],
                check=True, capture_output=True)

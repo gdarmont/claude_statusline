@@ -653,7 +653,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use render::{BLACK, format_row_within, format_sections, group_width, strip_ansi, truncate};
+    use render::{BLACK, format_row_within, format_sections, group_width, strip_ansi};
     use serde_json::{Value, json};
     use unicode_width::UnicodeWidthStr as _;
 
@@ -1169,17 +1169,6 @@ mod tests {
 
         assert_eq!(fmt_cache_countdown(59), "59s");
         assert_eq!(fmt_cache_countdown(3_600), "60m");
-
-        assert_eq!(truncate("hello world", 5), "hell\u{2026}");
-        assert_eq!(truncate("hi", 5), "hi");
-        assert_eq!(truncate("hello", 1), "\u{2026}");
-        // Wide characters take two cells each
-        assert_eq!(truncate("日本語テキスト", 5), "日本\u{2026}");
-        assert_eq!(
-            truncate("\u{1f680}\u{1f680}\u{1f680}", 4),
-            "\u{1f680}\u{2026}"
-        );
-        assert_eq!(truncate("日本", 4), "日本");
     }
 
     #[test]

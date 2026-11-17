@@ -8,7 +8,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use unicode_width::UnicodeWidthStr as _;
 
 const STATUSLINE: &str = env!("CARGO_BIN_EXE_claude_statusline");
-const SUBAGENT: &str = env!("CARGO_BIN_EXE_claude_subagent_statusline");
 
 struct Output {
     stdout: String,
@@ -256,59 +255,18 @@ fn a_cache_near_expiry_notifies_once() {
 }
 
 #[test]
-fn subagent_writes_one_json_line_per_parseable_task() {
-    let payload = r#"{
-        "columns": 80,
-        "tasks": [
-            {"id": "t1", "name": "Explore", "status": "running", "tokenCount": 12500, "contextWindowSize": 200000},
-            {"name": "missing id"},
-            {"id": "t2", "name": "Plan", "status": "completed", "tokenCount": "many"}
-        ]
-    }"#;
-    let out = run(SUBAGENT, payload, &[]);
-    let rows: Vec<serde_json::Value> = out
-        .stdout
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("each line is JSON"))
-        .collect();
-    let ids: Vec<&str> = rows.iter().filter_map(|row| row["id"].as_str()).collect();
-    assert_eq!(ids, ["t1", "t2"]);
-    let first = strip_ansi(rows[0]["content"].as_str().expect("content"));
-    assert!(
-        first.contains("Explore") && first.contains("12k/200k 6%"),
-        "{first}"
-    );
-}
-
-#[test]
 fn version_flag_prints_the_crate_version_without_reading_stdin() {
-    for (bin, name) in [
-        (STATUSLINE, "claude_statusline"),
-        (SUBAGENT, "claude_subagent_statusline"),
-    ] {
-        for flag in ["--version", "-V"] {
-            // Empty stdin: a binary that rendered instead would print `[statusline]` or nothing
-            let output = Command::new(bin)
-                .arg(flag)
-                .stdin(Stdio::null())
-                .output()
-                .expect("binary runs");
-            assert!(output.status.success());
-            assert_eq!(
-                String::from_utf8_lossy(&output.stdout),
-                format!("{name} {}\n", env!("CARGO_PKG_VERSION"))
-            );
-        }
+    for flag in ["--version", "-V"] {
+        // Empty stdin: a binary that rendered instead would print `[statusline]`
+        let output = Command::new(STATUSLINE)
+            .arg(flag)
+            .stdin(Stdio::null())
+            .output()
+            .expect("binary runs");
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("claude_statusline {}\n", env!("CARGO_PKG_VERSION"))
+        );
     }
-}
-
-#[test]
-fn subagent_emits_nothing_on_bad_input_so_defaults_stay() {
-    let out = run(SUBAGENT, "not json", &[]);
-    assert_eq!(out.stdout, "");
-    assert!(
-        out.stderr.starts_with("claude_subagent_statusline: "),
-        "{}",
-        out.stderr
-    );
 }

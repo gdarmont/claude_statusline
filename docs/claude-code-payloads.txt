@@ -1,4 +1,4 @@
-# Payloads Claude Code sends the status line commands, last checked against 2.1.318.
+# Payload Claude Code sends the status line command, last checked against 2.1.318.
 # Written by docs/check_schema.py --update; run it without to see what changed.
 
 ## statusLine: schema from the statusline-setup agent prompt
@@ -104,26 +104,4 @@
     "original_cwd": "string",   // The directory Claude was in before entering the worktree
     "original_branch": "string" // Optional: Branch that was checked out before entering the worktree
   }
-}
-
-## subagentStatusLine: payload builder, minified names shown as _
-{
-  ..._(_,_)
-  columns: _
-  tasks: [{
-    id: task.id
-    name: _.get(task.id)
-    type: task.type
-    agentType: task.agentType
-    status: task.status
-    description: task.description
-    label: _(task)||task.description
-    startTime: task.startTime
-    model: task.model
-    effort: task.effort
-    contextWindowSize: task.model?_(task.model,_()):void 0
-    tokenCount: task.progress?.tokenCount??0
-    tokenSamples: _.get(task.id)??[]
-    cwd: task.cwd??_
-  }]
 }

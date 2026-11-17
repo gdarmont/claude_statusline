@@ -37,12 +37,21 @@ cleanup() {
   if [ -n "$tmp" ]; then
     rm -rf "$tmp"
   fi
-  rm -f "$DEST/.claude_statusline.new" "$DEST/.claude_subagent_statusline.new" \
-    "$settings.claude_statusline.new"
+  rm -f "$DEST/.claude_statusline.new" "$settings.claude_statusline.new"
 }
 trap cleanup EXIT
 
-# Download the release, check it, and swap the binaries in
+# Releases up to v1.5.0 also installed claude_subagent_statusline, for the
+# subagentStatusLine setting that Claude Code v2.1.323 removed
+remove_subagent_binary() {
+  local bin="$DEST/claude_subagent_statusline"
+  if [ -e "$bin" ] || [ -e "$bin.bak" ]; then
+    rm -f "$bin" "$bin.bak"
+    printf 'Removed %s: Claude Code v2.1.323 dropped the subagentStatusLine setting it served\n' "$bin"
+  fi
+}
+
+# Download the release, check it, and swap the binary in
 install_release() {
   need curl
   need unzip
@@ -95,32 +104,27 @@ install_release() {
 
   mkdir -p "$DEST"
   # Keep a single pristine backup of whatever was installed before the first run.
-  for bin in claude_statusline claude_subagent_statusline; do
-    if [ -f "$DEST/$bin" ] && [ ! -f "$DEST/$bin.bak" ]; then
-      cp -p "$DEST/$bin" "$DEST/$bin.bak"
-      printf 'Backed up previous binary -> %s/%s.bak\n' "$DEST" "$bin"
-    fi
-  done
+  if [ -f "$DEST/claude_statusline" ] && [ ! -f "$DEST/claude_statusline.bak" ]; then
+    cp -p "$DEST/claude_statusline" "$DEST/claude_statusline.bak"
+    printf 'Backed up previous binary -> %s/claude_statusline.bak\n' "$DEST"
+  fi
 
   # Write next to the target, then rename over it: a status line render that
   # starts mid-update runs the old binary or the new one, never a partial file.
-  for bin in claude_statusline claude_subagent_statusline; do
-    install -m 755 "$tmp/unpacked/$bin" "$DEST/.$bin.new"
-    mv -f "$DEST/.$bin.new" "$DEST/$bin"
-  done
+  install -m 755 "$tmp/unpacked/claude_statusline" "$DEST/.claude_statusline.new"
+  mv -f "$DEST/.claude_statusline.new" "$DEST/claude_statusline"
 
   printf '\nInstalled %s -> %s\n' "$version" "$DEST"
+  remove_subagent_binary
 }
 
 if $settings_only; then
-  for bin in claude_statusline claude_subagent_statusline; do
-    [ -x "$DEST/$bin" ] || die "no $bin in $DEST to set up; install it first"
-  done
+  [ -x "$DEST/claude_statusline" ] || die "no claude_statusline in $DEST to set up; install it first"
 else
   install_release
 fi
 
-# The rest sets up settings.json: the two status line commands, and the optional
+# The rest sets up settings.json: the status line command, and the optional
 # settings the status line reads from its "env" block. With jq, it makes every
 # change in one write, after asking when there is a terminal and taking the
 # default answers when there is none. Without jq, it prints what to add.
@@ -224,8 +228,8 @@ if ! defined CLAUDE_STATUSLINE_UPDATE_CHECK; then
   fi
 fi
 
-# The status line commands. On an update, settings.json already runs them, in
-# full or as ~/...
+# The status line command. On an update, settings.json already runs it, in full
+# or as ~/...
 case "$DEST" in
   "$HOME"/*) short="~${DEST#"$HOME"}" ;;
   *)         short="$DEST" ;;
@@ -234,6 +238,14 @@ configured() {
   grep -qF -e "$DEST/$1\"" -e "$short/$1\"" "$settings" 2>/dev/null
 }
 ours() { [ "$1" = "$DEST/$2" ] || [ "$1" = "$short/$2" ]; }
+# A subagentStatusLine block left by a release up to v1.5.0, from any install
+# directory or a source build. Claude Code ignores it since v2.1.323.
+stale_sub() {
+  case "$1" in
+    claude_subagent_statusline | */claude_subagent_statusline) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 # The command settings.json runs for a status line, empty when there is none
 current_command() {
@@ -256,12 +268,15 @@ status_ok=false
 status_changes=()
 replacing=false
 status_block=null
-sub_block=null
+need_status=false
+sub_stale=false
+drop_sub=false
 refresh=false
 if $editable; then
   status_now=$(current_command statusLine)
   sub_now=$(current_command subagentStatusLine)
   if ! ours "$status_now" claude_statusline; then
+    need_status=true
     status_block=$(jq -n --arg command "$DEST/claude_statusline" \
       '{type: "command", command: $command, padding: 0, refreshInterval: 15}')
     status_changes+=("$(change statusLine "$status_now" "$DEST/claude_statusline")")
@@ -269,22 +284,26 @@ if $editable; then
       replacing=true
     fi
   elif [ "$(jq '.statusLine | has("refreshInterval")' "$settings")" = false ]; then
+    need_status=true
     refresh=true
     status_changes+=("$(printf '%-18s  add "refreshInterval": 15, so countdowns run while you are idle' statusLine)")
   fi
-  if ! ours "$sub_now" claude_subagent_statusline; then
-    sub_block=$(jq -n --arg command "$DEST/claude_subagent_statusline" \
-      '{type: "command", command: $command}')
-    status_changes+=("$(change subagentStatusLine "$sub_now" "$DEST/claude_subagent_statusline")")
-    if [ -n "$sub_now" ]; then
-      replacing=true
-    fi
+  if stale_sub "$sub_now"; then
+    sub_stale=true
+    drop_sub=true
+    status_changes+=("$(printf '%-18s  remove it: Claude Code v2.1.323 dropped the setting' subagentStatusLine)")
   fi
   if [ ${#status_changes[@]} -eq 0 ]; then
     status_ok=true
   fi
-elif configured claude_statusline && configured claude_subagent_statusline; then
-  status_ok=true
+else
+  configured claude_statusline || need_status=true
+  if grep -qF claude_subagent_statusline "$settings" 2>/dev/null; then
+    sub_stale=true
+  fi
+  if ! $need_status && ! $sub_stale; then
+    status_ok=true
+  fi
 fi
 
 # Replacing another status line is opt-in; adding one is the point of installing
@@ -312,7 +331,7 @@ elif [ ${#status_changes[@]} -gt 0 ] && $interactive; then
 fi
 if ! $apply_status; then
   status_block=null
-  sub_block=null
+  drop_sub=false
   refresh=false
 fi
 
@@ -328,10 +347,10 @@ saved=false
 if $editable && { [ ${#answers[@]} -gt 0 ] || $apply_status; }; then
   # shellcheck disable=SC2016 # jq variables, not shell ones
   if save_settings --argjson env "$env_add" --argjson status "$status_block" \
-    --argjson sub "$sub_block" --argjson refresh "$refresh" '
+    --argjson drop_sub "$drop_sub" --argjson refresh "$refresh" '
       (if $env == {} then . else .env = ((.env // {}) + $env) end)
       | (if $status == null then . else .statusLine = $status end)
-      | (if $sub == null then . else .subagentStatusLine = $sub end)
+      | (if $drop_sub then del(.subagentStatusLine) else . end)
       | (if $refresh then .statusLine.refreshInterval = 15 else . end)'; then
     saved=true
     printf '\nSaved to %s%s\n' "$settings" "$backup"
@@ -353,6 +372,10 @@ elif [ ${#unset_settings[@]} -gt 0 ]; then
   printf '  %s\n' "${unset_settings[@]}"
 fi
 
+# Dropping the subagentStatusLine block alone needs no restart: Claude Code ignores it
+if $saved && $apply_status && ! $need_status; then
+  status_ok=true
+fi
 if $status_ok; then
   if $settings_only; then
     printf '\nClaude Code is already set up for it.\n'
@@ -375,7 +398,8 @@ if $replacing && ! $apply_status; then
   printf '\nLeft the status line settings as they were: replacing another status line\ntakes a yes in a terminal.\n'
 fi
 
-cat <<EOF
+if $need_status; then
+  cat <<EOF
 
 Add this to $settings, then restart Claude Code:
 
@@ -384,13 +408,17 @@ Add this to $settings, then restart Claude Code:
     "command": "$DEST/claude_statusline",
     "padding": 0,
     "refreshInterval": 15
-  },
-  "subagentStatusLine": {
-    "type": "command",
-    "command": "$DEST/claude_subagent_statusline"
   }
 
 refreshInterval redraws the status line every 15 seconds, so the prompt cache
 countdown keeps running while the session is idle. Already configured? Add it
 to your existing statusLine block.
 EOF
+fi
+if $sub_stale; then
+  cat <<EOF
+
+Remove the "subagentStatusLine" block from $settings: it runs
+claude_subagent_statusline, which Claude Code ignores since v2.1.323.
+EOF
+fi

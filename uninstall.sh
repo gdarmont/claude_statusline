@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Remove claude_statusline: the two binaries, the files the status line keeps in
-# Claude Code's config directory, and its settings in settings.json.
+# Remove claude_statusline: the binary, the files the status line keeps in
+# Claude Code's config directory, and its settings in settings.json. It also
+# removes what releases up to v1.5.0 added for the subagentStatusLine setting
+# that Claude Code v2.1.323 dropped: the claude_subagent_statusline binary and
+# its block in settings.json.
 #
 #   curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/uninstall.sh | bash
 #
@@ -168,7 +171,8 @@ if [ -n "$manual" ]; then
 
 Remove these from $settings, then restart Claude Code:
 
-  - the "statusLine" and "subagentStatusLine" blocks, if they run claude_statusline
+  - the "statusLine" block, if it runs claude_statusline, and the
+    "subagentStatusLine" block, if it runs claude_subagent_statusline
   - the CLAUDE_STATUSLINE_* entries in the "env" block
 EOF
 elif [ ${#changes[@]} -gt 0 ]; then

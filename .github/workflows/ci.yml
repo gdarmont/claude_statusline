@@ -55,22 +55,24 @@ jobs:
         run: cargo test --locked
 
       # /bin/bash, because that is what `curl | bash` runs: bash 3.2 on macOS.
-      # With no terminal, both scripts go ahead without asking.
+      # With no terminal, both scripts go ahead without asking. The
+      # subagentStatusLine block is what releases up to v1.5.0 added, which an
+      # update removes; uninstall.sh still removes their subagent binary.
       - name: Install and uninstall scripts
         run: |
           dir=$(mktemp -d)
           export CLAUDE_DIR="$dir" CLAUDE_CONFIG_DIR="$dir"
-          for bin in claude_statusline claude_subagent_statusline; do
-            printf '#!/bin/sh\n' >"$dir/$bin"
-            chmod +x "$dir/$bin"
-          done
-          echo '{"model": "opus", "env": {"CLAUDE_STATUSLINE_UPDATE_CHECK": "0"}}' >"$dir/settings.json"
+          printf '#!/bin/sh\n' >"$dir/claude_statusline"
+          chmod +x "$dir/claude_statusline"
+          jq -n --arg dir "$dir" '{model: "opus", env: {CLAUDE_STATUSLINE_UPDATE_CHECK: "0"},
+            subagentStatusLine: {type: "command", command: "\($dir)/claude_subagent_statusline"}}' \
+            >"$dir/settings.json"
           /bin/bash install.sh --settings-only
           jq -e --arg dir "$dir" '.statusLine.command == "\($dir)/claude_statusline"
             and .statusLine.refreshInterval == 15
-            and .subagentStatusLine.command == "\($dir)/claude_subagent_statusline"' "$dir/settings.json"
+            and (has("subagentStatusLine") | not)' "$dir/settings.json"
           jq -e 'has("statusLine") | not' "$dir/settings.json.claude_statusline.bak"
-          touch "$dir/claude_statusline.update"
+          touch "$dir/claude_statusline.update" "$dir/claude_subagent_statusline"
           /bin/bash uninstall.sh
           [ "$(jq -c . "$dir/settings.json")" = '{"model":"opus"}' ]
           [ "$(ls "$dir" | tr '\n' ' ')" = 'settings.json settings.json.claude_statusline.bak ' ]

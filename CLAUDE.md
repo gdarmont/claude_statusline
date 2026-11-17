@@ -5,13 +5,13 @@ Powerline-style status line renderer for Claude Code, in Rust. It reads session 
 ## Layout
 
 - `src/main.rs`: the `claude_statusline` binary. It prints two rows, built by `location_sections` and `session_sections`, and each returns `(left, right)` section vectors.
-- `src/bin/claude_subagent_statusline.rs`: the `claude_subagent_statusline` binary. It prints one `{"id","content"}` JSON line per subagent task.
-- `src/render.rs`: shared colors, `Section`, powerline formatting, width and truncation helpers, and number/duration formatting.
-- `src/update.rs`: the once-a-day release check, used only by `claude_statusline`. The render reads a cached tag; a detached `claude_statusline --check-update <path>` refreshes it with `curl`.
-- `src/notify.rs`: the opt-in desktop notification before the prompt cache expires, used only by `claude_statusline`. A marker file per expiry and session keeps it to one notification; `notify-send` or `osascript` runs detached.
+- `src/render.rs`: colors, `Section`, powerline formatting, width helpers, and number/duration formatting.
+- `src/update.rs`: the once-a-day release check. The render reads a cached tag; a detached `claude_statusline --check-update <path>` refreshes it with `curl`.
+- `src/notify.rs`: the opt-in desktop notification before the prompt cache expires. A marker file per expiry and session keeps it to one notification; `notify-send` or `osascript` runs detached.
 - `src/lenient.rs`: deserializers that turn a field with an unexpected type into `None` (or drop a bad array element) instead of failing the parse.
-- There is no lib crate. Both binaries pull the shared files in with `mod`, and the subagent binary uses `#[path = "../…"]`.
-- Unit tests sit in a `#[cfg(test)] mod tests` at the bottom of each binary. `render.rs` helpers are tested from `main.rs`, so they don't run twice. `tests/cli.rs` runs the built binaries end to end.
+- There is no lib crate: `main.rs` pulls the other files in with `mod`.
+- Unit tests sit in a `#[cfg(test)] mod tests` at the bottom of `main.rs`, `render.rs` helpers included. `tests/cli.rs` runs the built binary end to end.
+- Releases up to v1.5.0 also shipped `claude_subagent_statusline`, for the `subagentStatusLine` setting that Claude Code v2.1.323 removed. `install.sh` and `dev-install.sh` delete that binary and its `subagentStatusLine` block, and `uninstall.sh` still removes both.
 
 ## Commands
 
@@ -31,11 +31,11 @@ cargo +1.88 test                            # the declared rust-version
 - Don't read the clock inside section builders. Take `now: u64` (Unix seconds) as a parameter, as `session_sections` does, so countdowns stay testable.
 - Measure width with `unicode-width` (terminal cells), never with `len()` or `chars().count()`. Right alignment depends on it.
 - Right alignment uses the `COLUMNS` env var minus `CLAUDE_STATUSLINE_RIGHT_MARGIN` (default 5). When the groups would overlap, join them into a single unpadded powerline, then drop sections by `priority` until it fits; without `COLUMNS`, render it whole. Never wrap. Give a new optional section a priority in the `priority` module, or it is never dropped.
-- On any error, `main` prints `[statusline]`, writes the reason to stderr (which `claude --debug` logs), and exits normally. The subagent binary prints nothing, so Claude Code keeps its default rows. Don't panic, because the release profile uses `panic = "abort"`.
+- On any error, `main` prints `[statusline]`, writes the reason to stderr (which `claude --debug` logs), and exits normally. Don't panic, because the release profile uses `panic = "abort"`.
 - Never block the render on the network. Anything slow goes to a detached process with stdout and stderr set to null, because an inherited stdout makes Claude Code wait for it. `tests/cli.rs` turns the update check off unless a test opts back in.
 - `unsafe_code` is forbidden. Keep dependencies minimal: serde, serde_json, unicode-width.
 - When a section, input field or env var changes, update `README.md` to match.
-- `README.md` § Input format records the Claude Code version both schemas were last checked against. Re-check them with `python3 docs/check_schema.py`, which diffs the installed `claude` binary against `docs/claude-code-payloads.txt`; once the changes are handled, `--update` records the new version there and in the README. When it can't find a payload, look by hand: the binary embeds the `statusLine` schema with comments in the statusline-setup agent prompt (search it for `recache_tokens_if_cold`), and builds the subagent payload next to the `subagentStatusLine` string (search for `tokenSamples`).
+- `README.md` § Input format records the Claude Code version the schema was last checked against. Re-check it with `python3 docs/check_schema.py`, which diffs the installed `claude` binary against `docs/claude-code-payloads.txt`; once the changes are handled, `--update` records the new version there and in the README. When it can't find the schema, look by hand: the binary embeds it with comments in the statusline-setup agent prompt (search it for `recache_tokens_if_cold`).
 
 ## Commits
 
