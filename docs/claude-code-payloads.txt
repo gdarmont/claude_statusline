@@ -1,4 +1,5 @@
-# Payload Claude Code sends the status line command, last checked against 2.1.326.
+# Payload Claude Code sends the status line command, and where it keeps the login,
+# last checked against 2.1.330.
 # Written by docs/check_schema.py --update; run it without to see what changed.
 
 ## statusLine: schema from the statusline-setup agent prompt
@@ -105,3 +106,11 @@
     "original_branch": "string" // Optional: Branch that was checked out before entering the worktree
   }
 }
+
+## account: where Claude Code keeps the login src/account.rs reads
+found    config file: .claude${suffix}.json in $CLAUDE_CONFIG_DIR, else the home directory
+found    legacy config file: .config.json in the config directory, read first
+found    suffix: -custom-oauth when CLAUDE_CODE_CUSTOM_OAUTH_URL is set
+found    login: oauthAccount
+found    email: emailAddress
+found    organization: organizationName

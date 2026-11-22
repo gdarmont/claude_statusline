@@ -341,7 +341,7 @@ know. The binary finishes in a few milliseconds, so the cost is negligible.
 
 ## Input format
 
-The schema below was last checked against Claude Code **v2.1.326**. Newer releases add fields the
+The schema below was last checked against Claude Code **v2.1.330**. Newer releases add fields the
 renderer ignores, and a field whose type changes hides its section instead of breaking the line.
 
 To see what a newer Claude Code changed, run `python3 docs/check_schema.py`. It reads the schema
