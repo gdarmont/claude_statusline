@@ -30,10 +30,10 @@ line refresh, without a restart. What changed in each version is on the
 
 It then sets up `settings.json`, asking first when there is a terminal:
 
-- The two optional features: the [cache expiry notification](#cache-expiry-notification), off by
-  default, and the daily [update check](#update-check), on by default. Every answer is saved in the
-  `env` block, a no included, so updates don't ask again. A setting already in `settings.json` or in
-  the environment is never asked about.
+- The optional features: the [cache expiry notification](#cache-expiry-notification) and the
+  [account](#account), off by default, and the daily [update check](#update-check), on by default.
+  Every answer is saved in the `env` block, a no included, so updates don't ask again. A setting
+  already in `settings.json` or in the environment is never asked about.
 - The [`statusLine` block](#configure-claude-code), when it doesn't run the installed binary yet,
   or `refreshInterval` when the status line runs without it. It also removes a `subagentStatusLine`
   block that runs `claude_subagent_statusline`. It lists the changes before applying them. If

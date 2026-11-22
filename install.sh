@@ -228,6 +228,27 @@ if ! defined CLAUDE_STATUSLINE_UPDATE_CHECK; then
   fi
 fi
 
+if ! defined CLAUDE_STATUSLINE_ACCOUNT; then
+  if $interactive; then
+    cat >/dev/tty <<'EOF'
+
+With several Claude accounts, the status line can show which one a session
+uses: its email address, or its organization (the email for a personal plan).
+EOF
+    while :; do
+      account=$(ask 'Show the account by email, org, or no [no]: ' no)
+      case "$account" in
+        [Ee] | [Ee][Mm][Aa][Ii][Ll]) account=email; break ;;
+        [Oo] | [Oo][Rr][Gg]) account=org; break ;;
+        [Nn] | [Nn][Oo]) account=0; break ;;
+      esac
+    done
+    answers+=("CLAUDE_STATUSLINE_ACCOUNT=$account")
+  else
+    unset_settings+=("CLAUDE_STATUSLINE_ACCOUNT       email or org shows the Claude account in use (default: off)")
+  fi
+fi
+
 # The status line command. On an update, settings.json already runs it, in full
 # or as ~/...
 case "$DEST" in
@@ -335,7 +356,7 @@ if ! $apply_status; then
   refresh=false
 fi
 
-# Keys are fixed and values are validated digits, so nothing needs escaping
+# Keys are fixed and values are validated digits or fixed words, so nothing needs escaping
 env_add="{"
 for pair in ${answers[@]+"${answers[@]}"}; do
   env_add+=$(printf '"%s": "%s", ' "${pair%%=*}" "${pair#*=}")
