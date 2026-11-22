@@ -347,6 +347,9 @@ renderer ignores, and a field whose type changes hides its section instead of br
 To see what a newer Claude Code changed, run `python3 docs/check_schema.py`. It reads the schema
 from the installed `claude` binary and diffs it against
 [`docs/claude-code-payloads.txt`](docs/claude-code-payloads.txt), the full schema as last checked.
+The [account](#account) section reads a file outside the payload, so the script also checks that
+the binary still keeps the login where `src/account.rs` looks for it, and that your own login has
+the fields it reads.
 Once the renderer and this README handle the changes, `--update` records the new version in both.
 
 Claude Code pipes a JSON object to stdin on every refresh. Every field below is optional except `workspace.current_dir` and `model.display_name`:
