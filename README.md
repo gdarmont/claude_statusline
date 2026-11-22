@@ -13,9 +13,101 @@ The output is two rows: the first says *where* you are working, the second says 
 
 Each row is split into a left group and a right group pinned to the right edge, so spend and rate limits keep a fixed screen position instead of drifting as the left side grows.
 
+## Install or update
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh | bash
+```
+
+Detects your platform, downloads the matching zip from the latest release, verifies it against the
+published `SHA256SUMS`, backs up the binary it replaces to `claude_statusline.bak` on first run, and
+installs it into `~/.claude/`. Prebuilt binaries cover x86_64 and aarch64 Linux (static musl;
+aarch64 from v1.2.0) and both Apple Silicon and Intel macOS; anything else needs a source build.
+
+To update, run the same command again. Claude Code switches to the new version on its next status
+line refresh, without a restart. What changed in each version is on the
+[releases page](https://github.com/gdarmont/claude_statusline/releases).
+
+It then sets up `settings.json`, asking first when there is a terminal:
+
+- The two optional features: the [cache expiry notification](#cache-expiry-notification), off by
+  default, and the daily [update check](#update-check), on by default. Every answer is saved in the
+  `env` block, a no included, so updates don't ask again. A setting already in `settings.json` or in
+  the environment is never asked about.
+- The [`statusLine` block](#configure-claude-code), when it doesn't run the installed binary yet,
+  or `refreshInterval` when the status line runs without it. It also removes a `subagentStatusLine`
+  block that runs `claude_subagent_statusline`. It lists the changes before applying them. If
+  `settings.json` already runs another status line, it shows that command and replaces it only if
+  you answer yes.
+
+With no terminal, or with `NONINTERACTIVE=1`, it takes the default answers without asking. It
+applies the status line changes, unless one of them would replace another status line: then it
+applies none and prints them instead. It leaves the optional features at their defaults without
+saving an answer, so a later run in a terminal still asks about them.
+
+It writes every change at once with `jq`, after copying the file to
+`settings.json.claude_statusline.bak`, and writes through a symlinked `settings.json` rather than
+replacing it. Without `jq`, or when `settings.json` isn't valid JSON, it leaves the file alone and
+prints what to change instead.
+
+Releases up to v1.5.0 also installed `claude_subagent_statusline`, for Claude Code's
+`subagentStatusLine` setting, which Claude Code v2.1.323 removed. An update deletes that binary and
+its `.bak` backup, and removes its block from `settings.json` along with the other changes.
+
+To run only this setup again, for the binary already installed, pass `--settings-only`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
+  | bash -s -- --settings-only
+```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDE_DIR` | `~/.claude` | Install directory |
+| `VERSION` | latest release | Pin to a specific tag, e.g. `v0.9.0` |
+| `NONINTERACTIVE` | unset | `1` skips the questions and takes the default answers, as happens with no terminal |
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
+  | VERSION=v0.9.0 CLAUDE_DIR=/opt/claude bash
+```
+
+### From source
+
+```sh
+./dev-install.sh
+```
+
+Builds the binary in release mode, installs it the same way, deletes the
+`claude_subagent_statusline` of an older release, smoke-tests what landed, and then runs
+`./install.sh --settings-only` to set up `settings.json`. Or by hand:
+
+```sh
+cargo build --release
+cp target/release/claude_statusline ~/.claude/
+```
+
+To check what's installed:
+
+```sh
+~/.claude/claude_statusline --version
+```
+
+Release zips and the binary in each carry a signed build provenance attestation (v1.2.0 and
+later). To confirm a binary was built by this repository's release workflow, with the
+[GitHub CLI](https://cli.github.com/) logged in:
+
+```sh
+gh attestation verify ~/.claude/claude_statusline --repo gdarmont/claude_statusline \
+  --signer-workflow gdarmont/claude_statusline/.github/workflows/release.yml
+```
+
+`--signer-workflow` accepts only signatures made by `release.yml`, not by other workflows in the
+repository.
+
 ## Sections
 
-Each table entry is one section of the example above, listed left to right.
+Each table entry is one section of the example at the top, listed left to right.
 
 ### Row 1 — location
 
@@ -166,98 +258,6 @@ cargo build --release
 ```
 
 The binary is `target/release/claude_statusline`.
-
-## Install or update
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh | bash
-```
-
-Detects your platform, downloads the matching zip from the latest release, verifies it against the
-published `SHA256SUMS`, backs up the binary it replaces to `claude_statusline.bak` on first run, and
-installs it into `~/.claude/`. Prebuilt binaries cover x86_64 and aarch64 Linux (static musl;
-aarch64 from v1.2.0) and both Apple Silicon and Intel macOS; anything else needs a source build.
-
-To update, run the same command again. Claude Code switches to the new version on its next status
-line refresh, without a restart. What changed in each version is on the
-[releases page](https://github.com/gdarmont/claude_statusline/releases).
-
-It then sets up `settings.json`, asking first when there is a terminal:
-
-- The two optional features: the [cache expiry notification](#cache-expiry-notification), off by
-  default, and the daily [update check](#update-check), on by default. Every answer is saved in the
-  `env` block, a no included, so updates don't ask again. A setting already in `settings.json` or in
-  the environment is never asked about.
-- The [`statusLine` block](#configure-claude-code), when it doesn't run the installed binary yet,
-  or `refreshInterval` when the status line runs without it. It also removes a `subagentStatusLine`
-  block that runs `claude_subagent_statusline`. It lists the changes before applying them. If
-  `settings.json` already runs another status line, it shows that command and replaces it only if
-  you answer yes.
-
-With no terminal, or with `NONINTERACTIVE=1`, it takes the default answers without asking. It
-applies the status line changes, unless one of them would replace another status line: then it
-applies none and prints them instead. It leaves the optional features at their defaults without
-saving an answer, so a later run in a terminal still asks about them.
-
-It writes every change at once with `jq`, after copying the file to
-`settings.json.claude_statusline.bak`, and writes through a symlinked `settings.json` rather than
-replacing it. Without `jq`, or when `settings.json` isn't valid JSON, it leaves the file alone and
-prints what to change instead.
-
-Releases up to v1.5.0 also installed `claude_subagent_statusline`, for Claude Code's
-`subagentStatusLine` setting, which Claude Code v2.1.323 removed. An update deletes that binary and
-its `.bak` backup, and removes its block from `settings.json` along with the other changes.
-
-To run only this setup again, for the binary already installed, pass `--settings-only`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
-  | bash -s -- --settings-only
-```
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `CLAUDE_DIR` | `~/.claude` | Install directory |
-| `VERSION` | latest release | Pin to a specific tag, e.g. `v0.9.0` |
-| `NONINTERACTIVE` | unset | `1` skips the questions and takes the default answers, as happens with no terminal |
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/gdarmont/claude_statusline/master/install.sh \
-  | VERSION=v0.9.0 CLAUDE_DIR=/opt/claude bash
-```
-
-### From source
-
-```sh
-./dev-install.sh
-```
-
-Builds the binary in release mode, installs it the same way, deletes the
-`claude_subagent_statusline` of an older release, smoke-tests what landed, and then runs
-`./install.sh --settings-only` to set up `settings.json`. Or by hand:
-
-```sh
-cargo build --release
-cp target/release/claude_statusline ~/.claude/
-```
-
-To check what's installed:
-
-```sh
-~/.claude/claude_statusline --version
-```
-
-Release zips and the binary in each carry a signed build provenance attestation (v1.2.0 and
-later). To confirm a binary was built by this repository's release workflow, with the
-[GitHub CLI](https://cli.github.com/) logged in:
-
-```sh
-gh attestation verify ~/.claude/claude_statusline --repo gdarmont/claude_statusline \
-  --signer-workflow gdarmont/claude_statusline/.github/workflows/release.yml
-```
-
-`--signer-workflow` accepts only signatures made by `release.yml`, not by other workflows in the
-repository.
 
 ## Uninstall
 
