@@ -21,6 +21,8 @@ fn run(bin: &str, stdin: &str, env: &[(&str, &str)]) -> Output {
         .env_remove("CLAUDE_CONFIG_DIR")
         .env_remove("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
         .env_remove("CLAUDE_STATUSLINE_CACHE_NOTIFY")
+        .env_remove("CLAUDE_STATUSLINE_ACCOUNT")
+        .env_remove("CLAUDE_CODE_CUSTOM_OAUTH_URL")
         // Tests opt back in, so none of them reach the network or the real ~/.claude
         .env("CLAUDE_STATUSLINE_UPDATE_CHECK", "0")
         .envs(env.iter().copied())
@@ -168,6 +170,37 @@ fn a_cached_newer_release_is_announced_on_the_first_row() {
 
     let off = [("CLAUDE_CONFIG_DIR", config)];
     assert!(!run(STATUSLINE, MINIMAL, &off).stdout.contains("v99"));
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_account_shows_on_the_first_row_only_when_asked() {
+    let dir = config_dir("account");
+    let config = dir.to_str().expect("utf-8 path");
+    fs::write(
+        dir.join(".claude.json"),
+        r#"{"oauthAccount":{"emailAddress":"me@work.com","organizationName":"Work"}}"#,
+    )
+    .expect("seed config");
+
+    let on = [
+        ("CLAUDE_CONFIG_DIR", config),
+        ("CLAUDE_STATUSLINE_ACCOUNT", "email"),
+    ];
+    let out = run(STATUSLINE, MINIMAL, &on);
+    assert!(
+        visible_lines(&out.stdout)[0].contains("\u{f007} me@work.com"),
+        "{}",
+        out.stdout
+    );
+
+    let off = [("CLAUDE_CONFIG_DIR", config)];
+    assert!(
+        !run(STATUSLINE, MINIMAL, &off)
+            .stdout
+            .contains("me@work.com")
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }

@@ -8,6 +8,7 @@ Powerline-style status line renderer for Claude Code, in Rust. It reads session 
 - `src/render.rs`: colors, `Section`, powerline formatting, width helpers, and number/duration formatting.
 - `src/update.rs`: the once-a-day release check. The render reads a cached tag; a detached `claude_statusline --check-update <path>` refreshes it with `curl`.
 - `src/notify.rs`: the opt-in desktop notification before the prompt cache expires. A marker file per expiry and session keeps it to one notification; `notify-send` or `osascript` runs detached.
+- `src/account.rs`: the opt-in account section. The payload has no account, so it reads `oauthAccount` from Claude Code's global config (`.claude.json`), looking where Claude Code does.
 - `src/lenient.rs`: deserializers that turn a field with an unexpected type into `None` (or drop a bad array element) instead of failing the parse.
 - There is no lib crate: `main.rs` pulls the other files in with `mod`.
 - Unit tests sit in a `#[cfg(test)] mod tests` at the bottom of `main.rs`, `render.rs` helpers included. `tests/cli.rs` runs the built binary end to end.

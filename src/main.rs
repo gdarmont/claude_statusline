@@ -1,3 +1,4 @@
+mod account;
 mod lenient;
 mod notify;
 mod render;
@@ -238,9 +239,10 @@ fn dir_name(input: &Input) -> &str {
 mod priority {
     pub const SESSION_NAME: u8 = 0;
     pub const UPDATE: u8 = 1;
-    pub const WORKTREE: u8 = 2;
-    pub const PR: u8 = 3;
-    pub const BRANCH: u8 = 4;
+    pub const ACCOUNT: u8 = 2;
+    pub const WORKTREE: u8 = 3;
+    pub const PR: u8 = 4;
+    pub const BRANCH: u8 = 5;
 
     pub const LINES: u8 = 0;
     pub const DURATION: u8 = 1;
@@ -601,6 +603,13 @@ fn update_notice(now: u64) -> Option<Section> {
     update::notice(&latest, env!("CARGO_PKG_VERSION")).map(|s| s.priority(priority::UPDATE))
 }
 
+/// Claude account in use, when `CLAUDE_STATUSLINE_ACCOUNT` asks for it.
+fn account_section(var: impl Fn(&str) -> Option<String> + Copy) -> Option<Section> {
+    let show = account::show(var)?;
+    let label = account::label(&account::config_files(var), show)?;
+    Some(Section::new(format!("\u{f007} {label}"), PURPLE, WHITE).priority(priority::ACCOUNT))
+}
+
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut input_str = String::new();
     std::io::stdin().read_to_string(&mut input_str)?;
@@ -608,6 +617,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let now = unix_now();
 
     let (left, mut right) = location_sections(&input);
+    right.extend(account_section(|name| std::env::var(name).ok()));
     right.extend(update_notice(now));
     if !left.is_empty() || !right.is_empty() {
         println!("{}", format_row(left, right));
@@ -1028,6 +1038,110 @@ mod tests {
     }
 
     #[test]
+    fn account_display_is_opt_in() {
+        let set = |value: &'static str| move |_: &str| Some(value.to_string());
+        assert_eq!(account::show(|_: &str| None), None);
+        for off in ["", "0", "false", "no", " OFF "] {
+            assert_eq!(account::show(set(off)), None, "{off:?}");
+        }
+        assert_eq!(account::show(set("email")), Some(account::Show::Email));
+        assert_eq!(account::show(set("1")), Some(account::Show::Email));
+        assert_eq!(account::show(set("Org")), Some(account::Show::Org));
+    }
+
+    #[test]
+    fn account_is_read_where_claude_code_keeps_its_config() {
+        let files = |pairs: &'static [(&str, &str)]| {
+            account::config_files(move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| (*value).to_string())
+            })
+        };
+        let paths = |paths: [&str; 2]| paths.map(std::path::PathBuf::from);
+        assert_eq!(
+            files(&[("HOME", "/home/u")]),
+            paths(["/home/u/.claude/.config.json", "/home/u/.claude.json"])
+        );
+        assert_eq!(
+            files(&[("HOME", "/home/u"), ("CLAUDE_CONFIG_DIR", "/cfg")]),
+            paths(["/cfg/.config.json", "/cfg/.claude.json"])
+        );
+        assert_eq!(
+            files(&[
+                ("HOME", "/home/u"),
+                ("CLAUDE_CODE_CUSTOM_OAUTH_URL", "https://sso")
+            ]),
+            paths([
+                "/home/u/.claude/.config.json",
+                "/home/u/.claude-custom-oauth.json"
+            ])
+        );
+        assert_eq!(files(&[]), Vec::<std::path::PathBuf>::new());
+    }
+
+    #[test]
+    fn account_section_shows_the_logged_in_account() {
+        let dir =
+            std::env::temp_dir().join(format!("claude_statusline-account-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("config directory");
+        let config = dir.to_str().expect("utf-8 path");
+        let shown = |show: &'static str| {
+            account_section(move |name: &str| match name {
+                "CLAUDE_CONFIG_DIR" => Some(config.to_string()),
+                "CLAUDE_STATUSLINE_ACCOUNT" => Some(show.to_string()),
+                _ => None,
+            })
+            .map(|section| section.text)
+        };
+        let write = |name: &str, contents: &str| {
+            std::fs::write(dir.join(name), contents).expect("config file");
+        };
+
+        assert_eq!(shown("email"), None);
+
+        write(
+            ".claude.json",
+            r#"{ "numStartups": 3, "oauthAccount": {
+                "emailAddress": "me@work.com", "organizationName": "Work" } }"#,
+        );
+        assert_eq!(shown("email").as_deref(), Some("\u{f007} me@work.com"));
+        assert_eq!(shown("org").as_deref(), Some("\u{f007} Work"));
+        assert_eq!(shown("off"), None);
+
+        // A personal plan's organization is named after its email
+        write(
+            ".claude.json",
+            r#"{ "oauthAccount": {
+                "emailAddress": "me@home.com", "organizationName": "me@home.com's Organization" } }"#,
+        );
+        assert_eq!(shown("org").as_deref(), Some("\u{f007} me@home.com"));
+
+        // A legacy config file takes over once it has content
+        write(".config.json", "");
+        assert_eq!(shown("email").as_deref(), Some("\u{f007} me@home.com"));
+        write(
+            ".config.json",
+            r#"{ "oauthAccount": { "emailAddress": "old@home.com" } }"#,
+        );
+        assert_eq!(shown("org").as_deref(), Some("\u{f007} old@home.com"));
+
+        // No login (an API key or a cloud provider), or a file caught mid-write: hidden
+        for contents in [
+            r#"{ "oauthAccount": null }"#,
+            r#"{ "oauthAccount": { "emailAddress": 42 } }"#,
+            r#"{ "oauthAcc"#,
+        ] {
+            write(".config.json", contents);
+            assert_eq!(shown("email"), None, "{contents}");
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn required_fields_stay_strict() {
         let missing_model = json!({ "workspace": { "current_dir": "/tmp" } });
         assert!(serde_json::from_value::<Input>(missing_model).is_err());
@@ -1140,9 +1254,17 @@ mod tests {
             "pr": { "number": 1234, "review_state": "approved" },
         }));
         assert_drops_in_order(
-            || location_sections(&input),
+            || {
+                let (left, mut right) = location_sections(&input);
+                // As `run` adds it, from the config file
+                right.push(
+                    Section::new("\u{f007} me@work.com", PURPLE, WHITE).priority(priority::ACCOUNT),
+                );
+                (left, right)
+            },
             &[
                 "my-session",
+                "me@work.com",
                 "\u{29c9} my-feature",
                 "PR #1234",
                 "\u{e0a0} worktree-my-feature",

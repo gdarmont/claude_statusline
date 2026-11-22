@@ -26,6 +26,7 @@ Each table entry is one section of the example above, listed left to right.
 | Worktree | `⧉ my-feature ← master` | Teal | Worktree name (`--worktree` session or linked git worktree), then `←` and the branch it was created from |
 | Pull request | `PR #1234 approved` | State-colored | Open PR for the current branch and its review state, clickable. `MR !1234` for a GitLab merge request. Green approved / red changes requested / yellow pending / slate draft |
 | Session name | `session-name` | Slate | **Right-aligned.** Only when set with `--name`, `/rename`, or an AI-generated title |
+| Account | ` you@example.com` | Purple | **Right-aligned.** Off by default, so not in the example. Claude account the session is logged in to, by email or organization. See [Account](#account) |
 | Update | `↑ v1.0.2` | Orange | **Right-aligned.** Only when a newer release is out, linked to [Install or update](#install-or-update). See [Update check](#update-check) |
 
 ### Row 2 — session state
@@ -60,8 +61,8 @@ into one continuous powerline with no padding. When even that doesn't fit, secti
 least useful first, until the row fits, instead of Claude Code clipping whatever reaches the right
 edge:
 
-- **Row 1:** session name, update notice, worktree, pull request, then git branch. The directory
-  always stays.
+- **Row 1:** session name, update notice, account, worktree, pull request, then git branch. The
+  directory always stays.
 - **Row 2:** lines changed, duration, agent, cost, 7-day limit, prompt cache, spend limit, 5-hour
   limit, then context. The model always stays.
 
@@ -122,6 +123,27 @@ directory) and the tokens the next message re-caches once the cache is cold. It 
 - The lead time must be shorter than the cache TTL. With a 5-minute TTL, use 1 to 4 minutes;
   longer lead times never fire.
 - It shows on the machine running Claude Code, so it won't reach you through SSH.
+
+### Account
+
+With several Claude accounts, such as one per `CLAUDE_CONFIG_DIR`, the status line can show which
+one a session uses. It is off by default. Set `CLAUDE_STATUSLINE_ACCOUNT` to `email` for the
+account's email address, or to `org` for its organization:
+
+```json
+{ "env": { "CLAUDE_STATUSLINE_ACCOUNT": "org" } }
+```
+
+It appears at the right of the first row, after the session name, as ` you@example.com` or
+` Acme`. A personal plan's organization is named after its email (`you@example.com's
+Organization`), so `org` shows the email for those.
+
+- The payload doesn't carry the account, so each render reads the claude.ai login that Claude Code
+  stores in `~/.claude.json` (`$CLAUDE_CONFIG_DIR/.claude.json` when set). A `/login` to another
+  account shows on the next refresh.
+- It is hidden when there is no stored login, as when you only ever used an API key or a cloud
+  provider. A login stored earlier still shows, though, even while an `ANTHROPIC_API_KEY` or a
+  cloud provider is what the session actually uses.
 
 ## Requirements
 
